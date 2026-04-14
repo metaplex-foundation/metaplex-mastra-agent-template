@@ -11,7 +11,8 @@ Out of the box you get a working Solana agent with balance queries, SOL/token tr
 ```
 +-----------------------------------------------------+
 |                     Frontend                         |
-|          (any WebSocket client / wallet UI)          |
+|    (metaplex.com, @metaplex-agent/ui, or any WS      |
+|     client with wallet support)                      |
 +---------------------------+--------------------------+
                             |
                       PlexChat Protocol
@@ -87,7 +88,24 @@ WEB_CHANNEL_TOKEN=<generate with: openssl rand -hex 24>
 pnpm dev
 ```
 
-The WebSocket server starts on `ws://localhost:3002` (or the port you configured). Connect with any WebSocket client:
+The WebSocket server starts on `ws://localhost:3002` (or the port you configured).
+
+### 4. Test with the built-in UI
+
+The repo includes a lightweight Next.js chat UI for testing without the full metaplex.com frontend:
+
+```bash
+# Set up the UI env (token must match WEB_CHANNEL_TOKEN in .env)
+cp packages/ui/.env.local.example packages/ui/.env.local
+# Edit packages/ui/.env.local with your token
+
+# Run both server and UI together
+pnpm dev:all
+```
+
+Open http://localhost:3001 to chat with the agent, connect a Solana wallet (Phantom/Solflare), and test transaction signing.
+
+You can also connect with any WebSocket client:
 
 ```bash
 npx wscat -c 'ws://localhost:3002/?token=YOUR_TOKEN_HERE'
@@ -197,6 +215,20 @@ metaplex-agent-template/
         types/
           protocol.ts           # PlexChat WebSocket message type definitions
           agent.ts              # AgentContext and TransactionSender interfaces
+
+    ui/                         # @metaplex-agent/ui
+      src/
+        app/
+          page.tsx              # Main page -- chat + wallet + transaction approval
+          providers.tsx         # Solana wallet adapter context providers
+          env.ts                # Client-side WebSocket URL builder
+        hooks/
+          use-plexchat.ts       # WebSocket hook (connect, messages, typing, reconnect)
+        components/
+          chat-panel.tsx        # Scrollable message list + input
+          chat-message.tsx      # Single message bubble
+          typing-indicator.tsx  # Animated typing dots
+          transaction-approval.tsx  # Sign + send transaction overlay
 ```
 
 ---
@@ -388,12 +420,14 @@ All commands are run from the workspace root.
 
 | Command | Description |
 |---|---|
-| `pnpm dev` | Start the server in watch mode (auto-restarts on changes) |
+| `pnpm dev` | Build deps then start the server in watch mode |
+| `pnpm dev:ui` | Start the test UI on http://localhost:3001 |
+| `pnpm dev:all` | Build deps then start both server and test UI |
 | `pnpm build` | Build all packages (`tsc` in each workspace) |
 | `pnpm typecheck` | Run TypeScript type checking across all packages (no emit) |
-| `pnpm clean` | Remove `dist/` directories from all packages |
+| `pnpm clean` | Remove `dist/` / `.next/` directories from all packages |
 
-The `dev` command uses `tsx watch` to run `packages/server/src/index.ts` with hot reload. Changes to any package source file will trigger a restart.
+The `dev` command builds `shared` and `core` first, then uses `tsx watch` to run `packages/server/src/index.ts` with hot reload. Changes to any package source file will trigger a restart.
 
 ### Building for production
 
