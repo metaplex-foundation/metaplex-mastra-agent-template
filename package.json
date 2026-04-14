@@ -5,6 +5,8 @@
   "description": "Template for building Metaplex Agent Registry agents",
   "scripts": {
     "dev": "pnpm --filter @metaplex-agent/server dev",
+    "dev:ui": "pnpm --filter @metaplex-agent/ui dev",
+    "dev:all": "pnpm --filter @metaplex-agent/server --filter @metaplex-agent/ui dev",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm -r typecheck"
