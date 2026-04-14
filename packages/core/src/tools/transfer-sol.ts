@@ -7,6 +7,7 @@ import {
   submitOrSend,
   type AgentContext,
 } from '@metaplex-agent/shared';
+import type { RequestContext } from '@mastra/core/request-context';
 
 export const transferSol = createTool({
   id: 'transfer-sol',
@@ -27,7 +28,12 @@ export const transferSol = createTool({
     message: z.string(),
   }),
   execute: async ({ destination, amount }, { requestContext }) => {
-    const context = requestContext as unknown as AgentContext;
+    const ctx = requestContext as RequestContext<AgentContext> | undefined;
+    const context: AgentContext = {
+      walletAddress: ctx?.get('walletAddress') ?? null,
+      transactionSender: ctx?.get('transactionSender') ?? null,
+      agentMode: ctx?.get('agentMode') ?? 'public',
+    };
     const umi = createUmi();
 
     const builder = transferSolIx(umi, {

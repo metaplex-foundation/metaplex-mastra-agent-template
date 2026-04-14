@@ -9,6 +9,7 @@ import {
   type ClientMessage,
 } from '@metaplex-agent/shared';
 import { createAgent } from '@metaplex-agent/core';
+import { RequestContext } from '@mastra/core/request-context';
 
 /**
  * PlexChat WebSocket Server
@@ -154,11 +155,12 @@ export class PlexChatServer {
         sendTransaction: (tx: ServerTransaction) => this.broadcast(tx),
       };
 
-      const agentContext: AgentContext = {
-        walletAddress: this.walletAddress,
-        transactionSender,
-        agentMode: config.AGENT_MODE,
-      };
+      // Create a RequestContext and populate it with agent context values
+      const requestContext = new RequestContext<AgentContext>([
+        ['walletAddress', this.walletAddress],
+        ['transactionSender', transactionSender],
+        ['agentMode', config.AGENT_MODE],
+      ]);
 
       // Prepend wallet context to the message if available
       let fullMessage = content;
@@ -168,6 +170,7 @@ export class PlexChatServer {
 
       // Invoke the agent
       const response = await this.agent.generate(fullMessage, {
+        requestContext: requestContext as any,
         maxSteps: 10,
       });
 

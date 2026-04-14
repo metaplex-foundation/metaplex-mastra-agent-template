@@ -12,6 +12,7 @@ import {
   submitOrSend,
   type AgentContext,
 } from '@metaplex-agent/shared';
+import type { RequestContext } from '@mastra/core/request-context';
 
 export const transferToken = createTool({
   id: 'transfer-token',
@@ -33,7 +34,12 @@ export const transferToken = createTool({
     message: z.string(),
   }),
   execute: async ({ mint, destination, amount }, { requestContext }) => {
-    const context = requestContext as unknown as AgentContext;
+    const ctx = requestContext as RequestContext<AgentContext> | undefined;
+    const context: AgentContext = {
+      walletAddress: ctx?.get('walletAddress') ?? null,
+      transactionSender: ctx?.get('transactionSender') ?? null,
+      agentMode: ctx?.get('agentMode') ?? 'public',
+    };
     const umi = createUmi();
 
     const mintPk = publicKey(mint);
