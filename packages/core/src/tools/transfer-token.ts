@@ -1,0 +1,86 @@
+import { createTool } from '@mastra/core/tools';
+import { z } from 'zod';
+import { publicKey, transactionBuilder } from '@metaplex-foundation/umi';
+import {
+  transferTokens,
+  findAssociatedTokenPda,
+  createTokenIfMissing,
+  fetchMint,
+} from '@metaplex-foundation/mpl-toolbox';
+import {
+  createUmi,
+  submitOrSend,
+  type AgentContext,
+} from '@metaplex-agent/shared';
+
+export const transferToken = createTool({
+  id: 'transfer-token',
+  description:
+    'Transfer SPL tokens from the connected wallet (public mode) or agent wallet (autonomous mode) to a destination address. Automatically creates the destination token account if needed.',
+  inputSchema: z.object({
+    mint: z.string().describe('The token mint address'),
+    destination: z.string().describe('The recipient wallet address'),
+    amount: z
+      .number()
+      .positive()
+      .describe(
+        'Amount of tokens to transfer in human-readable units (e.g., 100 for 100 tokens)'
+      ),
+  }),
+  outputSchema: z.object({
+    status: z.string(),
+    signature: z.string().optional(),
+    message: z.string(),
+  }),
+  execute: async ({ mint, destination, amount }, { requestContext }) => {
+    const context = requestContext as unknown as AgentContext;
+    const umi = createUmi();
+
+    const mintPk = publicKey(mint);
+    const destOwner = publicKey(destination);
+    const sourceOwner = umi.identity.publicKey;
+
+    // Fetch mint to get decimals for converting human-readable amount
+    const mintAccount = await fetchMint(umi, mintPk);
+    const rawAmount = BigInt(
+      Math.round(amount * Math.pow(10, mintAccount.decimals))
+    );
+
+    const [sourceAta] = findAssociatedTokenPda(umi, {
+      mint: mintPk,
+      owner: sourceOwner,
+    });
+    const [destinationAta] = findAssociatedTokenPda(umi, {
+      mint: mintPk,
+      owner: destOwner,
+    });
+
+    const builder = transactionBuilder()
+      .add(createTokenIfMissing(umi, { mint: mintPk, owner: destOwner }))
+      .add(
+        transferTokens(umi, {
+          source: sourceAta,
+          destination: destinationAta,
+          authority: umi.identity,
+          amount: rawAmount,
+        })
+      );
+
+    const result = await submitOrSend(umi, builder, context, {
+      message: `Transfer ${amount} tokens (${mint}) to ${destination}`,
+    });
+
+    if (result === 'sent-to-wallet') {
+      return {
+        status: 'pending',
+        message: `Transaction sent to your wallet for signing. Please approve the transfer of ${amount} tokens to ${destination}.`,
+      };
+    }
+
+    return {
+      status: 'confirmed',
+      signature: result,
+      message: `Successfully transferred ${amount} tokens to ${destination}. Signature: ${result}`,
+    };
+  },
+});
