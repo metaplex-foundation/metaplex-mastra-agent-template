@@ -1,9 +1,22 @@
 import { config } from 'dotenv';
-import { resolve } from 'path';
+import { existsSync } from 'fs';
+import { resolve, dirname } from 'path';
 import { z } from 'zod';
 
-// Load .env from workspace root
-config({ path: resolve(process.cwd(), '.env') });
+// Load .env from workspace root — walk up from cwd until we find it
+function findEnvFile(from: string): string {
+  let dir = from;
+  while (true) {
+    const candidate = resolve(dir, '.env');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return resolve(from, '.env'); // fallback
+}
+
+config({ path: findEnvFile(process.cwd()) });
 
 const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
