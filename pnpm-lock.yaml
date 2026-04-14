@@ -36,6 +36,25 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
 
+  packages/server:
+    dependencies:
+      '@metaplex-agent/core':
+        specifier: workspace:*
+        version: link:../core
+      '@metaplex-agent/shared':
+        specifier: workspace:*
+        version: link:../shared
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+
   packages/shared:
     dependencies:
       '@metaplex-foundation/mpl-toolbox':
