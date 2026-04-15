@@ -3,8 +3,11 @@ import {
   type TransactionBuilder,
   createNoopSigner,
   publicKey as toPublicKey,
+  sol,
 } from '@metaplex-foundation/umi';
 import { base64 } from '@metaplex-foundation/umi/serializers';
+import { findAssetSignerPda } from '@metaplex-foundation/mpl-core';
+import { transferSol } from '@metaplex-foundation/mpl-toolbox';
 import { getConfig } from './config.js';
 import type { AgentContext } from './types/agent.js';
 import bs58 from 'bs58';
@@ -42,6 +45,18 @@ export async function submitOrSend(
 
     // Use a noop signer for the user's wallet -- they'll sign on the frontend
     const walletSigner = createNoopSigner(toPublicKey(context.walletAddress));
+
+    // Prepend fee if agent is registered
+    if (context.agentAssetAddress && context.agentFeeSol > 0) {
+      const agentPda = findAssetSignerPda(umi, {
+        asset: toPublicKey(context.agentAssetAddress),
+      })[0];
+      builder = transferSol(umi, {
+        source: walletSigner,
+        destination: agentPda,
+        amount: sol(context.agentFeeSol),
+      }).add(builder);
+    }
 
     // Build the transaction with the user as fee payer
     const tx = await builder
