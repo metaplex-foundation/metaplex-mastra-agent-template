@@ -45,6 +45,8 @@ export const transferToken = createTool({
       agentMode: ctx?.get('agentMode') ?? 'public',
       agentAssetAddress: ctx?.get('agentAssetAddress') ?? null,
       agentTokenMint: ctx?.get('agentTokenMint') ?? null,
+      agentFeeSol: ctx?.get('agentFeeSol') ?? 0.001,
+      tokenOverride: ctx?.get('tokenOverride') ?? null,
     };
     const umi = createUmi();
 

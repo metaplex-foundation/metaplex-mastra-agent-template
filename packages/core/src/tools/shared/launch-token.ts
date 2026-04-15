@@ -6,7 +6,7 @@ import {
   type BondingCurveLaunchInput,
   type SvmNetwork,
 } from '@metaplex-foundation/genesis';
-import { createUmi, getConfig, type AgentContext } from '@metaplex-agent/shared';
+import { createUmi, getConfig, setState, type AgentContext } from '@metaplex-agent/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const launchToken = createTool({
@@ -57,6 +57,15 @@ export const launchToken = createTool({
       };
     }
 
+    const tokenOverride = ctx?.get('tokenOverride');
+    if (tokenOverride) {
+      return {
+        mintAddress: '',
+        launchLink: '',
+        message: `TOKEN_OVERRIDE is set to ${tokenOverride}. This agent is configured to buy back an existing token instead of launching its own.`,
+      };
+    }
+
     try {
       const config = getConfig();
       const umi = createUmi();
@@ -92,10 +101,12 @@ export const launchToken = createTool({
         }
       );
 
+      setState({ agentTokenMint: result.mintAddress });
+
       return {
         mintAddress: result.mintAddress,
         launchLink: result.launch.link,
-        message: `Token launched! Mint: ${result.mintAddress}. Save this as AGENT_TOKEN_MINT in your .env file. Creator fees will flow to your agent PDA automatically.`,
+        message: `Token launched! Mint: ${result.mintAddress}. This has been saved automatically. Creator fees will flow to your agent PDA automatically.`,
       };
     } catch (error) {
       return {

@@ -2,7 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { mintAndSubmitAgent } from '@metaplex-foundation/mpl-agent-registry';
 import type { SvmNetwork } from '@metaplex-foundation/mpl-agent-registry';
-import { createUmi, getConfig, type AgentContext } from '@metaplex-agent/shared';
+import { createUmi, getConfig, setState, type AgentContext } from '@metaplex-agent/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 import { base58 } from '@metaplex-foundation/umi/serializers';
 
@@ -61,10 +61,12 @@ export const registerAgent = createTool({
 
       const signatureStr = base58.deserialize(result.signature)[0];
 
+      setState({ agentAssetAddress: result.assetAddress });
+
       return {
         assetAddress: result.assetAddress,
         signature: signatureStr,
-        message: `Agent registered successfully! Asset address: ${result.assetAddress}. Save this as AGENT_ASSET_ADDRESS in your .env file.`,
+        message: `Agent registered successfully! Asset address: ${result.assetAddress}. This has been saved automatically.`,
       };
     } catch (error) {
       return {

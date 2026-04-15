@@ -34,7 +34,8 @@ export const sellToken = createTool({
   execute: async ({ tokenAmount, slippageBps }, { requestContext }) => {
     const ctx = requestContext as RequestContext<AgentContext> | undefined;
     const agentAssetAddress = ctx?.get('agentAssetAddress');
-    const agentTokenMint = ctx?.get('agentTokenMint');
+    const tokenOverride = ctx?.get('tokenOverride');
+    const agentTokenMint = tokenOverride ?? ctx?.get('agentTokenMint');
 
     if (!agentAssetAddress) {
       return {
@@ -52,7 +53,7 @@ export const sellToken = createTool({
         tokensSold: '',
         solReceived: '',
         priceImpact: '',
-        message: 'No agent token found. Launch a token first using launch-token.',
+        message: 'No token configured. Launch a token with launch-token, or set TOKEN_OVERRIDE in .env.',
       };
     }
 

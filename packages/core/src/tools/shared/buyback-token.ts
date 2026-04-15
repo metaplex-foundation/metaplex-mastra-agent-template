@@ -35,7 +35,8 @@ export const buybackToken = createTool({
   execute: async ({ solAmount, slippageBps }, { requestContext }) => {
     const ctx = requestContext as RequestContext<AgentContext> | undefined;
     const agentAssetAddress = ctx?.get('agentAssetAddress');
-    const agentTokenMint = ctx?.get('agentTokenMint');
+    const tokenOverride = ctx?.get('tokenOverride');
+    const agentTokenMint = tokenOverride ?? ctx?.get('agentTokenMint');
 
     if (!agentAssetAddress) {
       return {
@@ -53,7 +54,7 @@ export const buybackToken = createTool({
         solSpent: '',
         tokensReceived: '',
         priceImpact: '',
-        message: 'No agent token found. Launch a token first using launch-token.',
+        message: 'No token configured. Launch a token with launch-token, or set TOKEN_OVERRIDE in .env.',
       };
     }
 
