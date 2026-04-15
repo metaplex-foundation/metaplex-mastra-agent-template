@@ -1,2 +1,10 @@
-export { createAgent } from './agent.js';
-export { tools } from './tools/index.js';
+export { createAgent } from './create-agent.js';
+export { createPublicAgent } from './agent-public.js';
+export { createAutonomousAgent } from './agent-autonomous.js';
+export {
+  publicAgentTools,
+  autonomousAgentTools,
+  publicToolNames,
+  autonomousToolNames,
+  toolNames,
+} from './tools/index.js';

@@ -1,21 +1,22 @@
-import { getBalance } from './get-balance.js';
-import { getTokenBalances } from './get-token-balances.js';
-import { transferSol } from './transfer-sol.js';
-import { transferToken } from './transfer-token.js';
-import { getTransaction } from './get-transaction.js';
-import { sleep } from './sleep.js';
-import { getTokenPrice } from './get-token-price.js';
-import { getTokenMetadata } from './get-token-metadata.js';
+import { sharedTools } from './shared/index.js';
+import { publicTools } from './public/index.js';
+import { autonomousTools } from './autonomous/index.js';
 
-export const tools = {
-  getBalance,
-  getTokenBalances,
-  transferSol,
-  transferToken,
-  getTransaction,
-  sleep,
-  getTokenPrice,
-  getTokenMetadata,
+export const publicAgentTools = {
+  ...sharedTools,
+  ...publicTools,
 };
 
-export const toolNames = Object.keys(tools);
+export const autonomousAgentTools = {
+  ...sharedTools,
+  ...autonomousTools,
+};
+
+export { sharedTools, publicTools, autonomousTools };
+
+export const publicToolNames = Object.keys(publicAgentTools);
+export const autonomousToolNames = Object.keys(autonomousAgentTools);
+
+// Re-export for backward compatibility
+export const tools = publicAgentTools;
+export const toolNames = publicToolNames;

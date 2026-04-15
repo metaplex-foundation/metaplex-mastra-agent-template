@@ -8,7 +8,7 @@ import {
   type AgentContext,
   type ClientMessage,
 } from '@metaplex-agent/shared';
-import { createAgent } from '@metaplex-agent/core';
+import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';
 import { RequestContext } from '@mastra/core/request-context';
 
 /**
@@ -23,6 +23,7 @@ export class PlexChatServer {
   private clients: Set<WebSocket> = new Set();
   private walletAddress: string | null = null;
   private agent: ReturnType<typeof createAgent>;
+  private conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
   constructor() {
     this.agent = createAgent();
@@ -70,6 +71,7 @@ export class PlexChatServer {
 
     // --- Send connected message ---
     this.send(ws, { type: 'connected', jid: 'web:default' });
+    this.emitContext();
 
     // --- Message handler ---
     ws.on('message', (data: RawData) => {
@@ -127,7 +129,8 @@ export class PlexChatServer {
   }
 
   /**
-   * Handle a chat message: invoke the Mastra agent and send the response.
+   * Handle a chat message: invoke the Mastra agent via streaming and emit
+   * debug events over WebSocket as stream chunks arrive.
    */
   private async handleChatMessage(
     ws: WebSocket,
@@ -142,54 +145,146 @@ export class PlexChatServer {
       return;
     }
 
-    if (!content.trim()) return; // silently ignore empty
+    if (!content.trim()) return;
 
     const config = getConfig();
 
-    // --- Typing indicator ON ---
     this.broadcast({ type: 'typing', isTyping: true });
 
     try {
-      // Build the agent context with wallet and transaction sender
       const transactionSender: TransactionSender = {
         sendTransaction: (tx: ServerTransaction) => this.broadcast(tx),
       };
 
-      // Create a RequestContext and populate it with agent context values
       const requestContext = new RequestContext<AgentContext>([
         ['walletAddress', this.walletAddress],
         ['transactionSender', transactionSender],
         ['agentMode', config.AGENT_MODE],
+        ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
+        ['agentTokenMint', config.AGENT_TOKEN_MINT ?? null],
       ]);
 
-      // Prepend wallet context to the message if available
       let fullMessage = content;
       if (this.walletAddress) {
         fullMessage = `[User wallet: ${this.walletAddress}] ${content}`;
       }
 
-      // Invoke the agent
-      const response = await this.agent.generate(fullMessage, {
+      this.conversationHistory.push({ role: 'user', content: fullMessage });
+
+      const startTime = Date.now();
+
+      const stream = await this.agent.stream(this.conversationHistory, {
         requestContext: requestContext as any,
         maxSteps: 10,
       });
 
-      // Send the response
+      let currentStep = 0;
+      let stepStartTime = Date.now();
+
+      const reader = stream.fullStream.getReader();
+      try {
+        while (true) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+
+          switch (chunk.type) {
+            case 'step-start':
+              currentStep++;
+              stepStartTime = Date.now();
+              this.broadcast({
+                type: 'debug:step_start',
+                step: currentStep,
+                stepType: currentStep === 1 ? 'initial' : 'tool-result',
+              });
+              break;
+
+            case 'tool-call':
+              this.broadcast({
+                type: 'debug:tool_call',
+                step: currentStep,
+                toolCallId: chunk.payload.toolCallId,
+                toolName: chunk.payload.toolName,
+                args: (chunk.payload.args as Record<string, unknown>) ?? {},
+              });
+              break;
+
+            case 'tool-result':
+              this.broadcast({
+                type: 'debug:tool_result',
+                step: currentStep,
+                toolCallId: chunk.payload.toolCallId,
+                toolName: chunk.payload.toolName,
+                result: chunk.payload.result,
+                isError: chunk.payload.isError ?? false,
+                durationMs: Date.now() - stepStartTime,
+              });
+              break;
+
+            case 'text-delta':
+              this.broadcast({
+                type: 'debug:text_delta',
+                step: currentStep,
+                delta: chunk.payload.text,
+              });
+              break;
+
+            case 'step-finish':
+              this.broadcast({
+                type: 'debug:step_complete',
+                step: currentStep,
+                finishReason: chunk.payload.stepResult?.reason ?? 'unknown',
+                usage: {
+                  inputTokens: chunk.payload.output?.usage?.inputTokens ?? 0,
+                  outputTokens: chunk.payload.output?.usage?.outputTokens ?? 0,
+                  reasoningTokens: chunk.payload.output?.usage?.reasoningTokens,
+                  cachedInputTokens: chunk.payload.output?.usage?.cachedInputTokens,
+                },
+                durationMs: Date.now() - stepStartTime,
+              });
+              stepStartTime = Date.now();
+              break;
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      const text = await stream.text;
+      const totalUsage = await stream.totalUsage;
+
+      this.conversationHistory.push({ role: 'assistant', content: text });
+
+      this.broadcast({
+        type: 'debug:generation_complete',
+        totalSteps: currentStep,
+        totalUsage: {
+          inputTokens: totalUsage?.inputTokens ?? 0,
+          outputTokens: totalUsage?.outputTokens ?? 0,
+          reasoningTokens: totalUsage?.reasoningTokens,
+          cachedInputTokens: totalUsage?.cachedInputTokens,
+        },
+        totalDurationMs: Date.now() - startTime,
+        finishReason: (await stream.finishReason) ?? 'unknown',
+      });
+
       this.broadcast({
         type: 'message',
-        content: response.text,
+        content: text,
         sender: config.ASSISTANT_NAME,
       });
+
+      this.emitContext();
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : 'An unknown error occurred';
+      const errorContent = `I encountered an error: ${errorMsg}`;
+      this.conversationHistory.push({ role: 'assistant', content: errorContent });
       this.broadcast({
         type: 'message',
-        content: `I encountered an error: ${errorMsg}`,
+        content: errorContent,
         sender: config.ASSISTANT_NAME,
       });
     } finally {
-      // --- Typing indicator OFF ---
       this.broadcast({ type: 'typing', isTyping: false });
     }
   }
@@ -208,6 +303,7 @@ export class PlexChatServer {
 
     this.walletAddress = address;
     this.broadcast({ type: 'wallet_connected', address });
+    this.emitContext();
   }
 
   /**
@@ -216,6 +312,22 @@ export class PlexChatServer {
   private handleWalletDisconnect(): void {
     this.walletAddress = null;
     this.broadcast({ type: 'wallet_disconnected' });
+    this.emitContext();
+  }
+
+  private emitContext(): void {
+    const config = getConfig();
+    const tools = config.AGENT_MODE === 'autonomous' ? autonomousToolNames : publicToolNames;
+    this.broadcast({
+      type: 'debug:context',
+      agentMode: config.AGENT_MODE,
+      model: config.LLM_MODEL,
+      assistantName: config.ASSISTANT_NAME,
+      walletAddress: this.walletAddress,
+      connectedClients: this.clients.size,
+      conversationLength: this.conversationHistory.length,
+      tools,
+    });
   }
 
   /**

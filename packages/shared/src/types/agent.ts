@@ -17,4 +17,6 @@ export interface AgentContext {
   walletAddress: string | null;
   transactionSender: TransactionSender | null;
   agentMode: 'public' | 'autonomous';
+  agentAssetAddress: string | null;
+  agentTokenMint: string | null;
 }

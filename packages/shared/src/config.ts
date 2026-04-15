@@ -26,6 +26,9 @@ const envSchema = z.object({
   WEB_CHANNEL_PORT: z.coerce.number().default(3002),
   WEB_CHANNEL_TOKEN: z.string().min(1, 'WEB_CHANNEL_TOKEN is required'),
   ASSISTANT_NAME: z.string().default('Agent'),
+  JUPITER_API_KEY: z.string().optional(),
+  AGENT_ASSET_ADDRESS: z.string().optional(),
+  AGENT_TOKEN_MINT: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

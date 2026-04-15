@@ -1,6 +1,10 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { publicKey, sol } from '@metaplex-foundation/umi';
+import {
+  publicKey,
+  sol,
+  createNoopSigner,
+} from '@metaplex-foundation/umi';
 import { transferSol as transferSolIx } from '@metaplex-foundation/mpl-toolbox';
 import {
   createUmi,
@@ -33,11 +37,19 @@ export const transferSol = createTool({
       walletAddress: ctx?.get('walletAddress') ?? null,
       transactionSender: ctx?.get('transactionSender') ?? null,
       agentMode: ctx?.get('agentMode') ?? 'public',
+      agentAssetAddress: ctx?.get('agentAssetAddress') ?? null,
+      agentTokenMint: ctx?.get('agentTokenMint') ?? null,
     };
     const umi = createUmi();
 
+    // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
+    // In autonomous mode, umi.identity is already the agent's keypair.
+    const source = context.agentMode === 'public' && context.walletAddress
+      ? createNoopSigner(publicKey(context.walletAddress))
+      : umi.identity;
+
     const builder = transferSolIx(umi, {
-      source: umi.identity,
+      source,
       destination: publicKey(destination),
       amount: sol(amount),
     });

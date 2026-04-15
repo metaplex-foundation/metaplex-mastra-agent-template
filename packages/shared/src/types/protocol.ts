@@ -64,6 +64,85 @@ export interface ServerError {
   error: string;
 }
 
+// --- Debug Events (Server -> Client) ---
+
+export interface DebugStepStart {
+  type: 'debug:step_start';
+  step: number;
+  stepType: 'initial' | 'tool-result';
+}
+
+export interface DebugToolCall {
+  type: 'debug:tool_call';
+  step: number;
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
+export interface DebugToolResult {
+  type: 'debug:tool_result';
+  step: number;
+  toolCallId: string;
+  toolName: string;
+  result: unknown;
+  isError: boolean;
+  durationMs: number;
+}
+
+export interface DebugTextDelta {
+  type: 'debug:text_delta';
+  step: number;
+  delta: string;
+}
+
+export interface DebugStepComplete {
+  type: 'debug:step_complete';
+  step: number;
+  finishReason: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+    cachedInputTokens?: number;
+  };
+  durationMs: number;
+}
+
+export interface DebugGenerationComplete {
+  type: 'debug:generation_complete';
+  totalSteps: number;
+  totalUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+    cachedInputTokens?: number;
+  };
+  totalDurationMs: number;
+  traceId?: string;
+  finishReason: string;
+}
+
+export interface DebugContext {
+  type: 'debug:context';
+  agentMode: string;
+  model: string;
+  assistantName: string;
+  walletAddress: string | null;
+  connectedClients: number;
+  conversationLength: number;
+  tools: string[];
+}
+
+export type DebugMessage =
+  | DebugStepStart
+  | DebugToolCall
+  | DebugToolResult
+  | DebugTextDelta
+  | DebugStepComplete
+  | DebugGenerationComplete
+  | DebugContext;
+
 export type ServerMessage =
   | ServerConnected
   | ServerChatMessage
@@ -71,4 +150,5 @@ export type ServerMessage =
   | ServerTransaction
   | ServerWalletConnected
   | ServerWalletDisconnected
-  | ServerError;
+  | ServerError
+  | DebugMessage;

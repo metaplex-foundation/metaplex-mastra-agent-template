@@ -1,6 +1,10 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { publicKey, transactionBuilder } from '@metaplex-foundation/umi';
+import {
+  publicKey,
+  transactionBuilder,
+  createNoopSigner,
+} from '@metaplex-foundation/umi';
 import {
   transferTokens,
   findAssociatedTokenPda,
@@ -39,12 +43,20 @@ export const transferToken = createTool({
       walletAddress: ctx?.get('walletAddress') ?? null,
       transactionSender: ctx?.get('transactionSender') ?? null,
       agentMode: ctx?.get('agentMode') ?? 'public',
+      agentAssetAddress: ctx?.get('agentAssetAddress') ?? null,
+      agentTokenMint: ctx?.get('agentTokenMint') ?? null,
     };
     const umi = createUmi();
 
+    // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
+    // In autonomous mode, umi.identity is already the agent's keypair.
+    const authority = context.agentMode === 'public' && context.walletAddress
+      ? createNoopSigner(publicKey(context.walletAddress))
+      : umi.identity;
+
     const mintPk = publicKey(mint);
     const destOwner = publicKey(destination);
-    const sourceOwner = umi.identity.publicKey;
+    const sourceOwner = authority.publicKey;
 
     // Fetch mint to get decimals for converting human-readable amount
     const mintAccount = await fetchMint(umi, mintPk);
@@ -67,7 +79,7 @@ export const transferToken = createTool({
         transferTokens(umi, {
           source: sourceAta,
           destination: destinationAta,
-          authority: umi.identity,
+          authority,
           amount: rawAmount,
         })
       );

@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@metaplex-foundation/genesis": "^0.35.0",
+    "@metaplex-foundation/mpl-core": "^1.9.1",
+    "@metaplex-foundation/mpl-toolbox": "^0.10.0",
     "@metaplex-foundation/umi": "^1.1.0",
     "@metaplex-foundation/umi-bundle-defaults": "^1.1.0",
-    "@metaplex-foundation/mpl-toolbox": "^0.10.0",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.0",
     "zod": "^3.23.0"
