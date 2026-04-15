@@ -4,3 +4,4 @@ dist/
 *.tsbuildinfo
 .claude/
 docs/plans/
+agent-state.json
