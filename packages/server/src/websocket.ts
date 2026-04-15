@@ -162,6 +162,8 @@ export class PlexChatServer {
         ['agentMode', config.AGENT_MODE],
         ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
         ['agentTokenMint', config.AGENT_TOKEN_MINT ?? null],
+        ['agentFeeSol', config.AGENT_FEE_SOL],
+        ['tokenOverride', config.TOKEN_OVERRIDE ?? null],
       ]);
 
       let fullMessage = content;
