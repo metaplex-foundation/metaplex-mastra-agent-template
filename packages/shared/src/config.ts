@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import { existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { z } from 'zod';
+import { getState } from './state.js';
 
 // Load .env from workspace root — walk up from cwd until we find it
 function findEnvFile(from: string): string {
@@ -22,11 +23,13 @@ const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
-  AGENT_KEYPAIR: z.string().optional(),
+  AGENT_KEYPAIR: z.string().min(1, 'AGENT_KEYPAIR is required'),
   WEB_CHANNEL_PORT: z.coerce.number().default(3002),
   WEB_CHANNEL_TOKEN: z.string().min(1, 'WEB_CHANNEL_TOKEN is required'),
   ASSISTANT_NAME: z.string().default('Agent'),
   JUPITER_API_KEY: z.string().optional(),
+  AGENT_FEE_SOL: z.coerce.number().default(0.001),
+  TOKEN_OVERRIDE: z.string().optional(),
   AGENT_ASSET_ADDRESS: z.string().optional(),
   AGENT_TOKEN_MINT: z.string().optional(),
 });
@@ -47,6 +50,14 @@ export function getConfig(): EnvConfig {
       );
     }
     _config = result.data;
+
+    const state = getState();
+    if (!_config.AGENT_ASSET_ADDRESS && state.agentAssetAddress) {
+      _config.AGENT_ASSET_ADDRESS = state.agentAssetAddress;
+    }
+    if (!_config.AGENT_TOKEN_MINT && state.agentTokenMint) {
+      _config.AGENT_TOKEN_MINT = state.agentTokenMint;
+    }
   }
   return _config;
 }

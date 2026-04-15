@@ -19,4 +19,6 @@ export interface AgentContext {
   agentMode: 'public' | 'autonomous';
   agentAssetAddress: string | null;
   agentTokenMint: string | null;
+  agentFeeSol: number;
+  tokenOverride: string | null;
 }
