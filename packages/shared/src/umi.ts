@@ -19,7 +19,10 @@ export function createUmi(): Umi {
   const config = getConfig();
   const umi = createUmiBase(config.SOLANA_RPC_URL).use(mplToolbox());
 
-  const secretKey = bs58.decode(config.AGENT_KEYPAIR);
+  const raw = config.AGENT_KEYPAIR.trim();
+  const secretKey = raw.startsWith('[')
+    ? new Uint8Array(JSON.parse(raw))
+    : bs58.decode(raw);
   const keypair = umi.eddsa.createKeypairFromSecretKey(secretKey);
   const signer = createSignerFromKeypair(umi, keypair);
   umi.use(signerIdentity(signer));

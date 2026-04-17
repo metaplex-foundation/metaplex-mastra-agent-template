@@ -13,19 +13,17 @@ import type { AgentContext } from './types/agent.js';
 import bs58 from 'bs58';
 
 /**
- * Submits a transaction based on the agent mode:
+ * Submits a transaction based on the agent mode.
  *
- * - **Public mode**: Serializes the transaction to base64 and sends it to the
- *   connected frontend wallet for signing via the TransactionSender.
+ * - **Public mode**: serialize to base64, send to the user's wallet via
+ *   `transactionSender.sendAndAwait`, and return the confirmed signature once
+ *   the user approves and signs. Throws if the user rejects, the approval
+ *   times out, or the client disconnects.
  *
- * - **Autonomous mode**: Signs with the agent keypair and submits directly to
- *   the Solana network.
+ * - **Autonomous mode**: sign with the agent keypair and submit directly to
+ *   the Solana network; returns the signature.
  *
- * @param umi - The configured Umi instance
- * @param builder - A TransactionBuilder with instructions ready to go
- * @param context - Agent context with wallet address and transaction sender
- * @param options - Optional message and multi-transaction index/total
- * @returns Transaction signature (autonomous mode) or "sent-to-wallet" (public mode)
+ * @returns the base58 transaction signature
  */
 export async function submitOrSend(
   umi: Umi,
@@ -43,10 +41,10 @@ export async function submitOrSend(
       throw new Error('No wallet connected. Ask the user to connect their wallet first.');
     }
 
-    // Use a noop signer for the user's wallet -- they'll sign on the frontend
     const walletSigner = createNoopSigner(toPublicKey(context.walletAddress));
 
     // Prepend fee if agent is registered
+    let feeSol: number | undefined;
     if (context.agentAssetAddress && context.agentFeeSol > 0) {
       const agentPda = findAssetSignerPda(umi, {
         asset: toPublicKey(context.agentAssetAddress),
@@ -56,32 +54,28 @@ export async function submitOrSend(
         destination: agentPda,
         amount: sol(context.agentFeeSol),
       }).add(builder);
+      feeSol = context.agentFeeSol;
     }
 
-    // Build the transaction with the user as fee payer
     const tx = await builder
       .setFeePayer(walletSigner)
       .buildAndSign(umi);
 
-    // Serialize to base64
     const serialized = umi.transactions.serialize(tx);
     const txBase64 = base64.deserialize(serialized)[0];
 
-    // Send to frontend via WebSocket
-    context.transactionSender.sendTransaction({
-      type: 'transaction',
-      transaction: txBase64,
+    // Send to frontend and await user signature
+    const signature = await context.transactionSender.sendAndAwait(txBase64, {
       message: options?.message,
       index: options?.index,
       total: options?.total,
+      feeSol,
     });
 
-    return 'sent-to-wallet';
+    return signature;
   }
 
   // Autonomous mode: sign and submit
   const result = await builder.sendAndConfirm(umi);
-  // Convert signature bytes to base58 string
-  const signature = bs58.encode(result.signature);
-  return signature;
+  return bs58.encode(result.signature);
 }

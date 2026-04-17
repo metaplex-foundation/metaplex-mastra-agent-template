@@ -9,6 +9,7 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   isAgentTyping: boolean;
   isConnected: boolean;
+  isWalletConnected: boolean;
   onSendMessage: (content: string) => void;
 }
 
@@ -18,11 +19,16 @@ const SUGGESTIONS = [
   'What tokens do I have?',
 ];
 
-export function ChatPanel({ messages, isAgentTyping, isConnected, onSendMessage }: ChatPanelProps) {
+export function ChatPanel({ messages, isAgentTyping, isConnected, isWalletConnected, onSendMessage }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  // Debounce guard for suggestion buttons — an accidental double-click
+  // would otherwise fire two identical message sends.
+  const lastSendRef = useRef(0);
+
+  const canSend = isConnected && isWalletConnected;
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -57,7 +63,7 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, onSendMessage 
 
   function handleSubmit() {
     const trimmed = input.trim();
-    if (!trimmed || !isConnected) return;
+    if (!trimmed || !canSend) return;
     onSendMessage(trimmed);
     setInput('');
     // Reset textarea height
@@ -82,6 +88,12 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, onSendMessage 
   }
 
   function handleSuggestionClick(suggestion: string) {
+    if (!canSend) return;
+    const now = Date.now();
+    // 500ms guard — covers accidental double-clicks without feeling laggy
+    // to a user who genuinely wants to retry.
+    if (now - lastSendRef.current < 500) return;
+    lastSendRef.current = now;
     onSendMessage(suggestion);
   }
 
@@ -111,7 +123,7 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, onSendMessage 
                   <button
                     key={s}
                     onClick={() => handleSuggestionClick(s)}
-                    disabled={!isConnected}
+                    disabled={!canSend}
                     className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-300 transition-colors hover:border-zinc-500 hover:bg-zinc-800 hover:text-white disabled:opacity-40"
                   >
                     {s}
@@ -153,20 +165,25 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, onSendMessage 
               Not connected to agent. Messages cannot be sent.
             </p>
           )}
+          {isConnected && !isWalletConnected && (
+            <p className="mb-2 text-center text-xs text-amber-400/80">
+              Connect your wallet to start chatting.
+            </p>
+          )}
           <div className="flex items-end gap-2 rounded-2xl border border-zinc-700 bg-zinc-900 p-2 shadow-lg shadow-black/20 transition-colors focus-within:border-indigo-500/50 focus-within:shadow-indigo-500/5">
             <textarea
               ref={textareaRef}
               value={input}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder={isConnected ? 'Type a message...' : 'Waiting for connection...'}
-              disabled={!isConnected}
+              placeholder={!isConnected ? 'Waiting for connection...' : !isWalletConnected ? 'Connect your wallet to start chatting...' : 'Type a message...'}
+              disabled={!canSend}
               rows={1}
               className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-white placeholder-zinc-500 outline-none disabled:opacity-50"
             />
             <button
               onClick={handleSubmit}
-              disabled={!input.trim() || !isConnected}
+              disabled={!input.trim() || !canSend}
               className="flex-shrink-0 rounded-xl bg-indigo-600 p-2 text-white transition-colors hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

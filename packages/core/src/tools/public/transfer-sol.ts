@@ -7,70 +7,66 @@ import {
 } from '@metaplex-foundation/umi';
 import { transferSol as transferSolIx } from '@metaplex-foundation/mpl-toolbox';
 import {
+  BASE58_ADDRESS_RE,
   createUmi,
+  err,
+  ok,
+  readAgentContext,
   submitOrSend,
-  type AgentContext,
+  toToolError,
 } from '@metaplex-agent/shared';
-import type { RequestContext } from '@mastra/core/request-context';
 
 export const transferSol = createTool({
   id: 'transfer-sol',
   description:
-    'Transfer SOL from the connected wallet (public mode) or agent wallet (autonomous mode) to a destination address.',
+    "Transfer SOL from the connected user wallet to a destination address. The transaction is sent to the user's wallet for signing.",
   inputSchema: z.object({
     destination: z
       .string()
+      .regex(BASE58_ADDRESS_RE, 'destination must be a valid base58 Solana address')
       .describe('The recipient Solana wallet address'),
     amount: z
       .number()
+      .finite()
       .positive()
       .describe('Amount of SOL to transfer'),
   }),
   outputSchema: z.object({
-    status: z.string(),
+    status: z.string().optional(),
+    code: z.string().optional(),
     signature: z.string().optional(),
-    message: z.string(),
+    message: z.string().optional(),
   }),
   execute: async ({ destination, amount }, { requestContext }) => {
-    const ctx = requestContext as RequestContext<AgentContext> | undefined;
-    const context: AgentContext = {
-      walletAddress: ctx?.get('walletAddress') ?? null,
-      transactionSender: ctx?.get('transactionSender') ?? null,
-      agentMode: ctx?.get('agentMode') ?? 'public',
-      agentAssetAddress: ctx?.get('agentAssetAddress') ?? null,
-      agentTokenMint: ctx?.get('agentTokenMint') ?? null,
-      agentFeeSol: ctx?.get('agentFeeSol') ?? 0.001,
-      tokenOverride: ctx?.get('tokenOverride') ?? null,
-    };
-    const umi = createUmi();
+    const context = readAgentContext(requestContext);
 
-    // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
-    // In autonomous mode, umi.identity is already the agent's keypair.
-    const source = context.agentMode === 'public' && context.walletAddress
-      ? createNoopSigner(publicKey(context.walletAddress))
-      : umi.identity;
+    try {
+      const umi = createUmi();
 
-    const builder = transferSolIx(umi, {
-      source,
-      destination: publicKey(destination),
-      amount: sol(amount),
-    });
+      // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
+      // In autonomous mode, umi.identity is already the agent's keypair.
+      const source = context.agentMode === 'public' && context.walletAddress
+        ? createNoopSigner(publicKey(context.walletAddress))
+        : umi.identity;
 
-    const result = await submitOrSend(umi, builder, context, {
-      message: `Transfer ${amount} SOL to ${destination}`,
-    });
+      const builder = transferSolIx(umi, {
+        source,
+        destination: publicKey(destination),
+        amount: sol(amount),
+      });
 
-    if (result === 'sent-to-wallet') {
-      return {
-        status: 'pending',
-        message: `Transaction sent to your wallet for signing. Please approve the transfer of ${amount} SOL to ${destination}.`,
-      };
+      const signature = await submitOrSend(umi, builder, context, {
+        message: `Transfer ${amount} SOL to ${destination}`,
+      });
+
+      return ok({
+        signature,
+        message: `Successfully transferred ${amount} SOL to ${destination}. Signature: ${signature}`,
+      });
+    } catch (error) {
+      console.error('[transfer-sol]', error);
+      const { code, message } = toToolError(error);
+      return err(code, `Transfer failed: ${message}`);
     }
-
-    return {
-      status: 'confirmed',
-      signature: result,
-      message: `Successfully transferred ${amount} SOL to ${destination}. Signature: ${result}`,
-    };
   },
 });

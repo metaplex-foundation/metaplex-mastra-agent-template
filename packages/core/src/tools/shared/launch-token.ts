@@ -6,13 +6,23 @@ import {
   type BondingCurveLaunchInput,
   type SvmNetwork,
 } from '@metaplex-foundation/genesis';
-import { createUmi, getConfig, setState, type AgentContext } from '@metaplex-agent/shared';
+import {
+  createUmi,
+  err,
+  getConfig,
+  info,
+  ok,
+  setState,
+  toToolError,
+  updateConfigFromState,
+  type AgentContext,
+} from '@metaplex-agent/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const launchToken = createTool({
   id: 'launch-token',
   description:
-    'Launch an agent token on a bonding curve via Metaplex Genesis. WARNING: This is irreversible — each agent can only ever have one token. Always confirm with the user before calling this tool.',
+    'Launch an agent token on a bonding curve via Metaplex Genesis. WARNING: This is irreversible — each agent can only ever have one token. The agent pays and signs in both public and autonomous modes. Always confirm with the user before calling this tool, and pass `confirmIrreversible: true` to acknowledge the irreversible action.',
   inputSchema: z.object({
     name: z.string().min(1).max(32).describe('Token name (1-32 characters)'),
     symbol: z.string().min(1).max(10).describe('Token symbol (1-10 characters)'),
@@ -27,43 +37,56 @@ export const launchToken = createTool({
       .positive()
       .optional()
       .describe('SOL amount for an initial fee-free token purchase'),
+    confirmIrreversible: z
+      .literal(true)
+      .describe(
+        'Must be set to `true` to confirm the caller understands that launching a token is irreversible and each agent can only ever have one token. Never pass `true` without explicit user confirmation.',
+      ),
   }),
   outputSchema: z.object({
-    mintAddress: z.string(),
-    launchLink: z.string(),
-    message: z.string(),
+    status: z.string().optional(),
+    code: z.string().optional(),
+    mintAddress: z.string().optional(),
+    launchLink: z.string().optional(),
+    message: z.string().optional(),
   }),
   execute: async (
-    { name, symbol, imageUri, description, firstBuyAmount },
+    { name, symbol, imageUri, description, firstBuyAmount, confirmIrreversible },
     { requestContext }
   ) => {
+    // Belt-and-braces: Zod enforces `literal(true)` at parse time, but if a
+    // client somehow bypassed that we still refuse to proceed.
+    if (confirmIrreversible !== true) {
+      return err(
+        'INVALID_INPUT',
+        'launch-token requires explicit user confirmation via `confirmIrreversible: true`. Refusing to launch.',
+      );
+    }
+
     const ctx = requestContext as RequestContext<AgentContext> | undefined;
     const agentAssetAddress = ctx?.get('agentAssetAddress');
 
     if (!agentAssetAddress) {
-      return {
-        mintAddress: '',
-        launchLink: '',
-        message: 'Agent must be registered first. Use register-agent and delegate-execution before launching a token.',
-      };
+      return err(
+        'NOT_REGISTERED',
+        'Agent must be registered first. Use register-agent and delegate-execution before launching a token.',
+      );
     }
 
     const existingMint = ctx?.get('agentTokenMint');
     if (existingMint) {
-      return {
+      return info({
         mintAddress: existingMint,
-        launchLink: '',
         message: `Agent already has a token: ${existingMint}. Each agent can only have one token.`,
-      };
+      });
     }
 
     const tokenOverride = ctx?.get('tokenOverride');
     if (tokenOverride) {
-      return {
-        mintAddress: '',
-        launchLink: '',
+      return info({
+        mintAddress: tokenOverride,
         message: `TOKEN_OVERRIDE is set to ${tokenOverride}. This agent is configured to buy back an existing token instead of launching its own.`,
-      };
+      });
     }
 
     try {
@@ -102,18 +125,17 @@ export const launchToken = createTool({
       );
 
       setState({ agentTokenMint: result.mintAddress });
+      updateConfigFromState();
 
-      return {
+      return ok({
         mintAddress: result.mintAddress,
         launchLink: result.launch.link,
         message: `Token launched! Mint: ${result.mintAddress}. This has been saved automatically. Creator fees will flow to your agent PDA automatically.`,
-      };
+      });
     } catch (error) {
-      return {
-        mintAddress: '',
-        launchLink: '',
-        message: `Token launch failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
+      console.error('[launch-token]', error);
+      const { code, message } = toToolError(error);
+      return err(code, `Token launch failed: ${message}`);
     }
   },
 });

@@ -2,8 +2,12 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
   createUmi,
+  err,
   executeSwap,
+  getConfig,
+  ok,
   SOL_MINT,
+  toToolError,
   type AgentContext,
 } from '@metaplex-agent/shared';
 import type { RequestContext } from '@mastra/core/request-context';
@@ -15,6 +19,7 @@ export const buybackToken = createTool({
   inputSchema: z.object({
     solAmount: z
       .number()
+      .finite()
       .positive()
       .describe('Amount of SOL to spend on buying back the agent token'),
     slippageBps: z
@@ -26,11 +31,13 @@ export const buybackToken = createTool({
       .describe('Slippage tolerance in basis points (default 50 = 0.5%)'),
   }),
   outputSchema: z.object({
-    signature: z.string(),
-    solSpent: z.string(),
-    tokensReceived: z.string(),
-    priceImpact: z.string(),
-    message: z.string(),
+    status: z.string().optional(),
+    code: z.string().optional(),
+    signature: z.string().optional(),
+    solSpent: z.string().optional(),
+    tokensReceived: z.string().optional(),
+    priceImpact: z.string().optional(),
+    message: z.string().optional(),
   }),
   execute: async ({ solAmount, slippageBps }, { requestContext }) => {
     const ctx = requestContext as RequestContext<AgentContext> | undefined;
@@ -39,23 +46,22 @@ export const buybackToken = createTool({
     const agentTokenMint = tokenOverride ?? ctx?.get('agentTokenMint');
 
     if (!agentAssetAddress) {
-      return {
-        signature: '',
-        solSpent: '',
-        tokensReceived: '',
-        priceImpact: '',
-        message: 'Agent must be registered first. No agent asset address found.',
-      };
+      return err('NOT_REGISTERED', 'Agent must be registered first. No agent asset address found.');
     }
 
     if (!agentTokenMint) {
-      return {
-        signature: '',
-        solSpent: '',
-        tokensReceived: '',
-        priceImpact: '',
-        message: 'No token configured. Launch a token with launch-token, or set TOKEN_OVERRIDE in .env.',
-      };
+      return err(
+        'NO_TOKEN',
+        'No token configured. Launch a token with launch-token, or set TOKEN_OVERRIDE in .env.',
+      );
+    }
+
+    const config = getConfig();
+    if (slippageBps !== undefined && slippageBps > config.MAX_SLIPPAGE_BPS) {
+      return err(
+        'SLIPPAGE_TOO_HIGH',
+        `Slippage ${slippageBps} bps exceeds configured max of ${config.MAX_SLIPPAGE_BPS} bps`,
+      );
     }
 
     try {
@@ -70,21 +76,20 @@ export const buybackToken = createTool({
         slippageBps,
       });
 
-      return {
+      return ok({
         signature: result.signature,
         solSpent: result.inputAmount,
         tokensReceived: result.outputAmount,
         priceImpact: result.priceImpact,
         message: `Buyback complete. Spent ${solAmount} SOL, received ${result.outputAmount} tokens. Price impact: ${result.priceImpact}%.`,
-      };
+      });
     } catch (error) {
-      return {
-        signature: '',
-        solSpent: '',
-        tokensReceived: '',
-        priceImpact: '',
-        message: `Buyback failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
+      console.error('[buyback-token]', error);
+      if (error instanceof Error && error.message.startsWith('INTEGRITY:')) {
+        return err('INTEGRITY', `Buyback refused: ${error.message.slice('INTEGRITY:'.length).trim()}`);
+      }
+      const { code, message } = toToolError(error);
+      return err(code, `Buyback failed: ${message}`);
     }
   },
 });

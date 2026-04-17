@@ -9,7 +9,7 @@ import { useDebugPanel } from '@/hooks/use-debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { TransactionApproval } from '@/components/transaction-approval';
 import { DebugPanel } from '@/components/debug/debug-panel';
-import { getWsUrl } from './env';
+import { wsUrl, wsToken } from './env';
 
 function ConnectionStatus({ isConnected, isReconnecting }: { isConnected: boolean; isReconnecting: boolean }) {
   if (isConnected) {
@@ -38,14 +38,15 @@ function ConnectionStatus({ isConnected, isReconnecting }: { isConnected: boolea
 
 export default function Home() {
   const wallet = useWallet();
-  const [pendingTx, setPendingTx] = useState<ServerTransaction | null>(null);
+  const [txQueue, setTxQueue] = useState<ServerTransaction[]>([]);
 
   const debug = useDebugPanel();
 
-  const { messages, isConnected, isReconnecting, isAgentTyping, sendMessage, sendWalletConnect, sendWalletDisconnect, wsLog, clearWsLog } =
+  const { messages, isConnected, isReconnecting, isAgentTyping, error, sendMessage, sendWalletConnect, sendWalletDisconnect, sendTxResult, sendTxError, wsLog, clearWsLog } =
     usePlexChat({
-      url: getWsUrl(),
-      onTransaction: (tx) => setPendingTx(tx),
+      url: wsUrl(),
+      token: wsToken(),
+      onTransaction: (tx) => setTxQueue((prev) => [...prev, tx]),
       onDebugEvent: debug.handleDebugEvent,
     });
 
@@ -60,15 +61,29 @@ export default function Home() {
     }
   }, [wallet.publicKey, isConnected, sendWalletConnect, sendWalletDisconnect]);
 
+  // Guard: warn the user if they try to close/refresh the tab while a
+  // transaction approval is still pending. Losing the window abandons
+  // the correlationId and the agent will time out.
+  useEffect(() => {
+    if (txQueue.length === 0) return;
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      // Setting returnValue is required for legacy browsers.
+      event.returnValue = '';
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [txQueue.length]);
+
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <h1 className="text-lg font-semibold text-white">PlexChat</h1>
           <ConnectionStatus isConnected={isConnected} isReconnecting={isReconnecting} />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={debug.toggle}
             className={`rounded-lg p-2 transition-colors ${
@@ -90,6 +105,16 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Auth / connection error banner (surfaced from use-plexchat) */}
+      {error && (
+        <div
+          role="alert"
+          className="border-b border-red-500/30 bg-red-950/40 px-4 py-2 text-center text-sm text-red-300"
+        >
+          {error}
+        </div>
+      )}
+
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -97,32 +122,51 @@ export default function Home() {
             messages={messages}
             isAgentTyping={isAgentTyping}
             isConnected={isConnected}
+            isWalletConnected={!!wallet.publicKey}
             onSendMessage={sendMessage}
           />
         </div>
 
         {debug.isOpen && (
-          <div className="w-[400px] flex-shrink-0">
-            <DebugPanel
-              activeTab={debug.activeTab}
-              onTabChange={debug.setActiveTab}
-              traces={debug.traces}
-              context={debug.context}
-              messages={messages}
-              wsLog={wsLog}
-              onClearWsLog={clearWsLog}
-              sessionTotals={debug.sessionTotals}
-              isConnected={isConnected}
+          <>
+            {/* Desktop: side-by-side panel. Mobile: full-screen overlay with dismiss. */}
+            <div
+              className="fixed inset-0 z-40 bg-black/60 md:hidden"
+              onClick={debug.toggle}
+              aria-hidden="true"
             />
-          </div>
+            <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-shrink-0 flex-col bg-zinc-950 md:static md:z-auto md:w-[400px]">
+              <DebugPanel
+                activeTab={debug.activeTab}
+                onTabChange={debug.setActiveTab}
+                traces={debug.traces}
+                context={debug.context}
+                messages={messages}
+                wsLog={wsLog}
+                onClearWsLog={clearWsLog}
+                sessionTotals={debug.sessionTotals}
+                isConnected={isConnected}
+              />
+            </div>
+          </>
         )}
       </div>
 
       {/* Transaction overlay */}
-      {pendingTx && (
+      {txQueue.length > 0 && (
         <TransactionApproval
-          transaction={pendingTx}
-          onComplete={() => setPendingTx(null)}
+          transaction={txQueue[0]}
+          onComplete={(result) => {
+            if (result.signature) {
+              sendTxResult(result.correlationId, result.signature);
+              setTxQueue((prev) => prev.slice(1));
+            } else {
+              // Reject or error — abort the whole multi-tx queue. The agent
+              // decides what to do next based on the tx_error notification.
+              sendTxError(result.correlationId, result.error ?? 'Transaction failed');
+              setTxQueue([]);
+            }
+          }}
         />
       )}
     </div>

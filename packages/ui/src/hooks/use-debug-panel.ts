@@ -23,7 +23,7 @@ export interface ToolCallTrace {
 
 export interface StepTrace {
   step: number;
-  stepType: 'initial' | 'tool-result';
+  stepType: 'initial' | 'tool-result' | 'continue';
   toolCalls: ToolCallTrace[];
   text: string;
   usage?: TokenUsage;
@@ -69,13 +69,46 @@ export interface UseDebugPanelReturn {
 // --- Hook ---
 
 const STORAGE_KEY = 'debug-panel-open';
+const ACTIVE_TAB_STORAGE_KEY = 'plexchat-debug-active-tab';
+
+const VALID_TABS: DebugTab[] = ['steps', 'context', 'messages', 'totals'];
+
+function isValidTab(value: string | null): value is DebugTab {
+  return value !== null && (VALID_TABS as string[]).includes(value);
+}
+
+// localStorage can throw in Safari private mode, when the store is full,
+// or when cookies are blocked. We treat failures as "no preference" and
+// keep the UI functional rather than crashing the app on mount.
+function safeGetItem(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch (err) {
+    console.warn(`[debug-panel] localStorage.getItem(${key}) failed`, err);
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[debug-panel] localStorage.setItem(${key}) failed`, err);
+  }
+}
 
 export function useDebugPanel(): UseDebugPanelReturn {
-  const [isOpen, setIsOpen] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem(STORAGE_KEY) === 'true';
+  const [isOpen, setIsOpen] = useState(() => safeGetItem(STORAGE_KEY) === 'true');
+  const [activeTab, setActiveTabState] = useState<DebugTab>(() => {
+    const stored = safeGetItem(ACTIVE_TAB_STORAGE_KEY);
+    return isValidTab(stored) ? stored : 'steps';
   });
-  const [activeTab, setActiveTab] = useState<DebugTab>('steps');
+  const setActiveTab = useCallback((tab: DebugTab) => {
+    setActiveTabState(tab);
+    safeSetItem(ACTIVE_TAB_STORAGE_KEY, tab);
+  }, []);
   const [traces, setTraces] = useState<MessageTrace[]>([]);
   const [context, setContext] = useState<DebugContext | null>(null);
   const [sessionTotals, setSessionTotals] = useState<SessionTotals>({
@@ -94,7 +127,7 @@ export function useDebugPanel(): UseDebugPanelReturn {
   const toggle = useCallback(() => {
     setIsOpen((prev) => {
       const next = !prev;
-      localStorage.setItem(STORAGE_KEY, String(next));
+      safeSetItem(STORAGE_KEY, String(next));
       return next;
     });
   }, []);

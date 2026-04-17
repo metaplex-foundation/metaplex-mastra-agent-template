@@ -1,36 +1,28 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { resolve, dirname } from 'path';
 
 const STATE_FILENAME = 'agent-state.json';
-
-export interface AgentState {
-  agentAssetAddress?: string;
-  agentTokenMint?: string;
-}
+const WORKSPACE_MARKER = 'pnpm-workspace.yaml';
 
 /**
- * Find the state file by walking up from cwd (same logic as .env resolution).
+ * Anchor the state file to the pnpm workspace root. Walks up from `from`
+ * looking for `pnpm-workspace.yaml`; if found, writes `agent-state.json`
+ * alongside it. If no workspace root is found (monorepo marker missing),
+ * falls back to `<from>/agent-state.json` so behavior stays sane in
+ * standalone setups.
  */
 function findStateFile(from: string): string {
   let dir = from;
   while (true) {
-    const candidate = resolve(dir, STATE_FILENAME);
-    if (existsSync(candidate)) return candidate;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  // Default: put it next to where .env would be (workspace root)
-  // Walk up again looking for package.json with workspaces or .env
-  dir = from;
-  while (true) {
-    if (existsSync(resolve(dir, '.env')) || existsSync(resolve(dir, 'pnpm-workspace.yaml'))) {
+    if (existsSync(resolve(dir, WORKSPACE_MARKER))) {
       return resolve(dir, STATE_FILENAME);
     }
     const parent = dirname(dir);
-    if (parent === dir) return resolve(from, STATE_FILENAME);
+    if (parent === dir) break; // reached filesystem root
     dir = parent;
   }
+  // No workspace root found — default next to cwd.
+  return resolve(from, STATE_FILENAME);
 }
 
 let _statePath: string | null = null;
@@ -40,6 +32,11 @@ function getStatePath(): string {
     _statePath = findStateFile(process.cwd());
   }
   return _statePath;
+}
+
+export interface AgentState {
+  agentAssetAddress?: string;
+  agentTokenMint?: string;
 }
 
 export function getState(): AgentState {
@@ -56,5 +53,8 @@ export function getState(): AgentState {
 export function setState(updates: Partial<AgentState>): void {
   const current = getState();
   const merged = { ...current, ...updates };
-  writeFileSync(getStatePath(), JSON.stringify(merged, null, 2) + '\n');
+  const statePath = getStatePath();
+  const tmpPath = statePath + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 });
+  renameSync(tmpPath, statePath);
 }

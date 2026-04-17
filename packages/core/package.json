@@ -16,6 +16,7 @@
     "@metaplex-foundation/genesis": "^0.35.0",
     "@metaplex-foundation/mpl-agent-registry": "^0.2.5",
     "@metaplex-foundation/mpl-core": "^1.9.1",
+    "@noble/hashes": "1.7.1",
     "@metaplex-foundation/mpl-toolbox": "^0.10.0",
     "@metaplex-foundation/umi": "^1.1.0",
     "zod": "^3.23.0"

@@ -22,10 +22,10 @@ Out of the box you get a working Solana agent with balance queries, SOL/token tr
 |                  @metaplex-agent/server               |
 |                                                       |
 |  - Authenticates WebSocket connections                |
-|  - Manages wallet state                               |
+|  - Manages per-session wallet state                   |
 |  - Routes messages to the Mastra agent                |
-|  - Broadcasts responses, typing indicators,           |
-|    and transactions back to clients                   |
+|  - Sends responses, typing indicators, and            |
+|    transactions back to the originating session       |
 +---------+----------------------------+---------------+
           |                            |
           v                            v
@@ -46,7 +46,7 @@ Out of the box you get a working Solana agent with balance queries, SOL/token tr
 2. `server` authenticates, sets typing indicator, invokes the Mastra agent.
 3. Agent selects and runs tools from `core` (which use `shared` for Umi and transactions).
 4. In **public mode**, transactions are serialized and pushed back over the WebSocket for the user to sign. In **autonomous mode**, the agent signs and submits directly.
-5. Agent text response is broadcast to all connected clients.
+5. Agent text response is sent back to the originating session (each WebSocket connection is isolated — see "Session Model" in [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md)).
 
 ---
 
@@ -79,7 +79,14 @@ AGENT_MODE=public
 LLM_MODEL=anthropic/claude-sonnet-4-5-20250929
 ANTHROPIC_API_KEY=sk-ant-...
 SOLANA_RPC_URL=https://api.devnet.solana.com
+AGENT_KEYPAIR=<base58-encoded secret key or JSON byte array>
 WEB_CHANNEL_TOKEN=<generate with: openssl rand -hex 24>
+```
+
+`AGENT_KEYPAIR` is required in **both** modes — the agent always needs a keypair to sign registration, delegation, and treasury operations. Generate one with:
+
+```bash
+solana-keygen new --no-bip39-passphrase --outfile /dev/stdout
 ```
 
 ### 3. Run in development
@@ -123,52 +130,87 @@ Send a test message:
 
 The template supports two operating modes, controlled by the `AGENT_MODE` environment variable.
 
-### Public Mode (1-to-many)
+Both modes share the same unified identity (keypair + on-chain asset + PDA + optional token). The only difference is how transactions are **routed**: who signs and submits them. See [`docs/SPEC.md`](./docs/SPEC.md) §3 and §4 for the full model.
+
+### Public Mode (multi-user, user-signed txs)
 
 ```
 AGENT_MODE=public
 ```
 
-The agent has **no keypair**. When a tool needs to execute a transaction, the agent serializes it and sends it over the WebSocket as a `transaction` message. The frontend wallet (Phantom, Solflare, etc.) signs and submits it.
+End users sign their own transactions in their browser wallet. The agent builds the transaction with the user's wallet as fee payer (via `createNoopSigner`), serializes it, and sends it over the WebSocket. The server prepends a configurable SOL fee (`AGENT_FEE_SOL`) payable to the agent's PDA once the agent is registered.
 
-**Use cases:** wallet cleanup bots, faucet agents, NFT minting assistants, any agent serving multiple users who sign their own transactions.
+Each WebSocket connection is its own session (isolated wallet, conversation history, and pending transaction queue), so multiple concurrent users can share a single server instance safely.
+
+**Use cases:** wallet cleanup bots, faucet agents, NFT minting assistants, token launch assistants, portfolio advisors.
 
 **How it works:**
-- `createUmi()` returns a Umi instance with no signer identity.
-- `submitOrSend()` builds the transaction with the connected wallet as fee payer (using a noop signer), serializes to base64, and pushes it through the `TransactionSender` callback.
-- The tool returns `"sent-to-wallet"` and the agent tells the user to approve in their wallet.
+- `createUmi()` returns a Umi instance seeded with the agent keypair; it still signs server-side operations (registration, Jupiter swaps that go through the agent wallet), but user-facing transactions use a `NoopSigner` placeholder for the connected wallet.
+- `submitOrSend()` builds the transaction, prepends the agent fee, serializes to base64, pushes it through the `TransactionSender`, and **awaits** the user's signature via a correlation-ID-keyed promise (see [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md)).
+- The tool returns the real signature (or throws on rejection/timeout).
 
-### Autonomous Mode (1-to-1)
+### Autonomous Mode (agent-signed txs)
 
 ```
 AGENT_MODE=autonomous
 AGENT_KEYPAIR=<base58-encoded secret key>
+OWNER_WALLET=<base58 pubkey>   # required until the agent registers on-chain
 ```
 
-The agent has **its own Solana keypair**. It signs and submits transactions directly to the network without user interaction.
+The agent signs and submits transactions directly with its keypair. Only the on-chain asset owner (or `OWNER_WALLET` bootstrap fallback) is allowed to interact — non-owner WebSocket connections are rejected at the connection gate before the LLM is ever invoked.
 
 **Use cases:** portfolio rebalancer, trading bot, automated treasury manager, any agent that acts independently.
 
 **How it works:**
 - `createUmi()` decodes `AGENT_KEYPAIR`, creates a signer, and sets it as the Umi identity and fee payer.
-- `submitOrSend()` calls `builder.sendAndConfirm(umi)` and returns the transaction signature.
+- `submitOrSend()` calls `builder.sendAndConfirm(umi)` and returns the base58 signature.
 
 ---
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `AGENT_MODE` | No | `public` | `"public"` or `"autonomous"` |
-| `LLM_MODEL` | No | `anthropic/claude-sonnet-4-5-20250929` | Mastra model identifier (see below) |
-| `ANTHROPIC_API_KEY` | If using Anthropic | -- | Anthropic API key |
-| `OPENAI_API_KEY` | If using OpenAI | -- | OpenAI API key |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | If using Google | -- | Google Generative AI API key |
-| `SOLANA_RPC_URL` | No | `https://api.devnet.solana.com` | Solana JSON-RPC endpoint |
-| `AGENT_KEYPAIR` | In autonomous mode | -- | Base58-encoded secret key for the agent wallet |
-| `WEB_CHANNEL_PORT` | No | `3002` | WebSocket server port |
-| `WEB_CHANNEL_TOKEN` | **Yes** | -- | Shared secret for WebSocket authentication |
-| `ASSISTANT_NAME` | No | `Agent` | Display name used in chat responses |
+All variables are loaded from `.env` at the workspace root and validated with Zod at startup. The table below groups them by whether they are required, optional-with-default, or optional-no-default. See [`docs/SPEC.md`](./docs/SPEC.md) §8.1 for the canonical list.
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `AGENT_KEYPAIR` | Base58-encoded secret key (or JSON byte array) for the agent wallet. Required in both modes -- the agent always has a keypair that signs registration, delegation, and treasury operations. |
+| `WEB_CHANNEL_TOKEN` | Shared secret for WebSocket authentication. **Must be at least 32 characters.** Generate with `openssl rand -hex 24` (48 hex chars) or `openssl rand -hex 32` (64 hex chars). |
+| LLM API Key | One of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, matching the provider prefix in `LLM_MODEL`. |
+
+### Optional (with defaults)
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_MODE` | `public` | `"public"` or `"autonomous"` |
+| `LLM_MODEL` | `anthropic/claude-sonnet-4-5-20250929` | Mastra model identifier (`provider/model-id`) |
+| `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana JSON-RPC endpoint |
+| `WEB_CHANNEL_PORT` | `3002` | WebSocket server port |
+| `ASSISTANT_NAME` | `Agent` | Display name in chat responses |
+| `AGENT_FEE_SOL` | `0.001` | SOL fee prepended to each user tx (public mode only) |
+| `MAX_STEPS` | `10` | Max LLM + tool steps per user message |
+| `MAX_CONNECTIONS` | `10` | Max concurrent WebSocket sessions |
+| `ENABLE_DEBUG_EVENTS` | `true` | Stream `debug:*` telemetry events |
+| `MAX_SLIPPAGE_BPS` | `500` | Upper cap on `slippageBps` for swap tools |
+| `MAX_PRICE_IMPACT_PCT` | `2.0` | Upper cap on Jupiter `priceImpactPct` |
+| `OWNER_CACHE_TTL_MS` | `300000` | TTL for cached on-chain owner lookups |
+| `WS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:3000` | Comma-separated allowed `Origin` list for WS handshakes (CSWSH protection) |
+| `MAX_MESSAGE_CONTENT` | `8000` | Per-message character cap on inbound chat `content` |
+| `MAX_RPC_TIME_BUDGET_MS` | `60000` | Per-message cumulative RPC wall-clock budget before abort |
+| `LOG_AUTH_FAILURES` | `true` | Emit `console.warn` on token mismatch, origin rejection, autonomous-gate denial, rate-limit breach |
+
+### Optional (no default)
+
+| Variable | Description |
+|---|---|
+| `OWNER_WALLET` | Base58 pubkey of the agent owner. Bootstrap fallback used before on-chain registration. Required for autonomous mode pre-registration. |
+| `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted to `agent-state.json` otherwise) |
+| `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
+| `TOKEN_OVERRIDE` | Target a specific token for buybacks (e.g. MPLX mint) instead of launching |
+| `JUPITER_API_KEY` | Jupiter API key for price data and swap quotes |
+| `AGENT_FUNDING_SOL` | Override SOL amount sent to the agent wallet during `register-agent` funding (default `0.02`) |
+| `AGENT_FUNDING_THRESHOLD_SOL` | Balance threshold that triggers the funding flow (default `0.01`) |
 
 **LLM_MODEL format:** `<provider>/<model-id>`, using Mastra's model router. Examples:
 
@@ -178,6 +220,16 @@ The agent has **its own Solana keypair**. It signs and submits transactions dire
 
 Set the corresponding API key environment variable for whichever provider you choose.
 
+### UI Environment (packages/ui/.env.local)
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_WS_HOST` | `localhost` | WebSocket server host |
+| `NEXT_PUBLIC_WS_PORT` | `3002` | WebSocket server port |
+| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars) |
+| `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC for wallet adapter |
+| `NEXT_PUBLIC_SOLANA_CLUSTER` | `devnet` | Cluster used for Solana Explorer links. One of `mainnet-beta`, `devnet`, `testnet`. |
+
 ---
 
 ## Project Structure
@@ -185,36 +237,66 @@ Set the corresponding API key environment variable for whichever provider you ch
 ```
 metaplex-agent-template/
   .env.example                  # Environment variable reference
+  agent-state.json              # Auto-generated agent identity (gitignored)
   package.json                  # Root workspace scripts (dev, build, typecheck)
   pnpm-workspace.yaml           # pnpm workspace definition
   tsconfig.json                 # Shared TypeScript config (ES2022, strict)
   WEBSOCKET_PROTOCOL.md         # Full PlexChat protocol specification
+  docs/
+    SPEC.md                     # Product requirements / canonical spec
+    REVIEW_REPORT.md            # Audit findings
+    REVIEW_DESIGN.md            # Remediation design doc
 
   packages/
     core/                       # @metaplex-agent/core
       src/
-        agent.ts                # Mastra Agent definition, system prompt, model config
+        create-agent.ts         # Factory: returns public or autonomous agent
+        agent-public.ts         # Public-mode Mastra Agent definition
+        agent-autonomous.ts     # Autonomous-mode Mastra Agent definition
+        prompts.ts              # Shared base prompt + mode-specific addendums
+        index.ts                # Package exports
         tools/
-          index.ts              # Tool registry -- add new tools here
-          get-balance.ts        # Query SOL balance for any address
-          get-token-balances.ts # Query all SPL token holdings for an address
-          transfer-sol.ts       # Transfer SOL (public or autonomous)
-          transfer-token.ts     # Transfer SPL tokens (public or autonomous)
-          get-transaction.ts    # Look up transaction status by signature
+          index.ts              # Tool registry -- mode-based assignment
+          shared/               # 12 tools available in both modes
+            get-balance.ts        # SOL balance for any address
+            get-token-balances.ts # All SPL holdings for an address
+            get-transaction.ts    # Transaction status lookup
+            get-token-price.ts    # Jupiter USD price for any token
+            get-token-metadata.ts # Token name/symbol/image via DAS
+            sleep.ts              # Pause 1-300 seconds (polling loops)
+            register-agent.ts     # Mint agent asset on the Agent Registry
+            delegate-execution.ts # Set up executive signing authority
+            launch-token.ts       # Launch token via Metaplex Genesis
+            swap-token.ts         # Jupiter DEX swap
+            buyback-token.ts      # Buy the agent's own token (SOL -> token)
+            sell-token.ts         # Sell the agent's own token (token -> SOL)
+          public/               # 2 tools only for public mode
+            transfer-sol.ts       # Transfer SOL from user wallet
+            transfer-token.ts     # Transfer SPL tokens from user wallet
 
     server/                     # @metaplex-agent/server
       src/
         index.ts                # Entry point -- creates and starts the server
-        websocket.ts            # PlexChatServer class (auth, routing, broadcast)
+        websocket.ts            # PlexChatServer class (auth, routing, streaming)
+        session.ts              # Per-connection Session (state, send, cleanup)
 
     shared/                     # @metaplex-agent/shared
       src/
         config.ts               # Zod-validated env config loader (getConfig)
         umi.ts                  # Umi factory (createUmi) -- mode-aware signer setup
-        transaction.ts          # submitOrSend() -- public/autonomous transaction routing
+        transaction.ts          # submitOrSend() -- mode-aware tx routing + fee prepend
+        execute.ts              # Tool execution wrapper with RequestContext
+        auth.ts                 # Owner resolution, auth policy, withAuth wrapper
+        context.ts              # readAgentContext() -- shared AgentContext extractor
+        error-codes.ts          # Shared protocol/tool error code constants
+        server-limits.ts        # Server-side limit helpers (content size, RPC budget, ...)
+        jupiter.ts              # Jupiter API helpers + simulateAndVerifySwap
+        state.ts                # agent-state.json read/write
+        index.ts                # Barrel exports
         types/
           protocol.ts           # PlexChat WebSocket message type definitions
           agent.ts              # AgentContext and TransactionSender interfaces
+          tool-result.ts        # ToolResult<T> + ok()/info()/err() helpers
 
     ui/                         # @metaplex-agent/ui
       src/
@@ -224,23 +306,32 @@ metaplex-agent-template/
           env.ts                # Client-side WebSocket URL builder
         hooks/
           use-plexchat.ts       # WebSocket hook (connect, messages, typing, reconnect)
+          use-debug-panel.ts    # Debug telemetry tracking
         components/
           chat-panel.tsx        # Scrollable message list + input
           chat-message.tsx      # Single message bubble
           typing-indicator.tsx  # Animated typing dots
           transaction-approval.tsx  # Sign + send transaction overlay
+          debug/                    # Debug panel (Steps, Context, Messages, Totals)
 ```
 
 ---
 
 ## Adding New Tools
 
+Tools live under `packages/core/src/tools/` in one of two subdirectories:
+
+- **`shared/`** -- available in both public and autonomous modes (12 tools ship in this directory)
+- **`public/`** -- only registered in public mode (`transfer-sol`, `transfer-token`)
+
+Pick the one that matches your tool's scope.
+
 ### 1. Create the tool file
 
-Create a new file in `packages/core/src/tools/`. Here is an example read-only tool:
+Here is an example read-only tool placed in `shared/`:
 
 ```typescript
-// packages/core/src/tools/get-account-info.ts
+// packages/core/src/tools/shared/get-account-info.ts
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -279,68 +370,67 @@ export const getAccountInfo = createTool({
 
 ### 2. Register the tool
 
-Add it to the tool registry in `packages/core/src/tools/index.ts`:
+Add the import and entry to `packages/core/src/tools/shared/index.ts` (or `public/index.ts` for public-only tools):
 
 ```typescript
+// packages/core/src/tools/shared/index.ts
 import { getBalance } from './get-balance.js';
 import { getTokenBalances } from './get-token-balances.js';
-import { transferSol } from './transfer-sol.js';
-import { transferToken } from './transfer-token.js';
 import { getTransaction } from './get-transaction.js';
+// ...existing imports...
 import { getAccountInfo } from './get-account-info.js';  // <-- add import
 
-export const tools = {
+export const sharedTools = {
   getBalance,
   getTokenBalances,
-  transferSol,
-  transferToken,
   getTransaction,
+  // ...existing tools...
   getAccountInfo,  // <-- add to registry
 };
 ```
 
-That is all that is needed. Mastra automatically exposes registered tools to the LLM.
+That is all that is needed. Mastra automatically exposes registered tools to the LLM. The top-level `tools/index.ts` composes `sharedTools` + `publicTools` (public mode) or just `sharedTools` (autonomous mode).
 
 ### 3. Tools that write transactions
 
 For tools that build and submit transactions, use the `submitOrSend` helper from `@metaplex-agent/shared`. This function handles both agent modes automatically:
 
-- **Public mode:** serializes the transaction to base64 and pushes it to the frontend wallet via WebSocket.
-- **Autonomous mode:** signs with the agent keypair and submits directly to the network.
+- **Public mode:** serializes the transaction to base64, pushes it to the connected client, and **awaits** the user's signature. Returns the confirmed signature (or throws on rejection/timeout).
+- **Autonomous mode:** signs with the agent keypair and submits directly to the network. Returns the signature.
 
-See `transfer-sol.ts` for the full pattern. The key parts are:
+Either way, `submitOrSend` returns a real `Promise<string>` resolving to the base58 signature -- there is no longer a `'sent-to-wallet'` pending state to branch on.
+
+See `packages/core/src/tools/public/transfer-sol.ts` for the full pattern. The key parts:
 
 ```typescript
-import { submitOrSend, type AgentContext } from '@metaplex-agent/shared';
-import type { RequestContext } from '@mastra/core/request-context';
+import { submitOrSend, createUmi, readAgentContext, ok, err } from '@metaplex-agent/shared';
 
 // Inside your tool's execute function:
 execute: async ({ destination, amount }, { requestContext }) => {
-  // Extract agent context from the request
-  const ctx = requestContext as RequestContext<AgentContext> | undefined;
-  const context: AgentContext = {
-    walletAddress: ctx?.get('walletAddress') ?? null,
-    transactionSender: ctx?.get('transactionSender') ?? null,
-    agentMode: ctx?.get('agentMode') ?? 'public',
-  };
+  // Extract the full AgentContext from RequestContext (handles defaults for you).
+  const context = readAgentContext(requestContext);
 
   const umi = createUmi();
 
   // Build the transaction using Umi / mpl-toolbox
   const builder = transferSolIx(umi, { /* ... */ });
 
-  // Submit or send -- handles both modes
-  const result = await submitOrSend(umi, builder, context, {
-    message: `Transfer ${amount} SOL to ${destination}`,
-  });
+  try {
+    // Submit or send -- handles both modes, returns the signature
+    const signature = await submitOrSend(umi, builder, context, {
+      message: `Transfer ${amount} SOL to ${destination}`,
+    });
 
-  if (result === 'sent-to-wallet') {
-    return { status: 'pending', message: 'Transaction sent to wallet for signing.' };
+    // Use the ok()/info()/err() helpers from @metaplex-agent/shared for a
+    // consistent ToolResult<T> shape the LLM can branch on (`status` field).
+    return ok({ signature, message: `Done. Signature: ${signature}` });
+  } catch (e) {
+    return err('GENERIC', e instanceof Error ? e.message : String(e));
   }
-
-  return { status: 'confirmed', signature: result, message: `Done. Signature: ${result}` };
 };
 ```
+
+See [`docs/SPEC.md`](./docs/SPEC.md) Appendix B for the canonical `AgentContext` shape and §5.2 for the `ToolResult<T>` convention.
 
 ---
 
@@ -348,13 +438,16 @@ execute: async ({ destination, amount }, { requestContext }) => {
 
 ### Changing the system prompt
 
-Edit the `SYSTEM_PROMPT` constant in `packages/core/src/agent.ts`:
+The system prompt lives in `packages/core/src/prompts.ts`. It exports a shared base prompt plus a per-mode addendum, composed at agent creation time via `buildSystemPrompt(mode)`. Edit the base constant to change the agent's personality or domain focus:
 
 ```typescript
-const SYSTEM_PROMPT = `You are a DeFi portfolio assistant on Solana.
+// packages/core/src/prompts.ts
+export const BASE_SYSTEM_PROMPT = `You are a DeFi portfolio assistant on Solana.
 You help users track their holdings, suggest rebalancing strategies,
 and execute swaps when asked. Always explain risks before executing trades.`;
 ```
+
+Update the mode addendums (also in `prompts.ts`) when you want public- or autonomous-specific guidance.
 
 ### Switching LLM providers
 
@@ -393,18 +486,22 @@ The WebSocket server implements the **PlexChat** protocol for bidirectional comm
 | `message` | Send a chat message to the agent |
 | `wallet_connect` | Notify the server of a connected Solana wallet address |
 | `wallet_disconnect` | Clear the connected wallet |
+| `tx_result` | Report a signed and submitted transaction (requires `correlationId` + `signature`) |
+| `tx_error` | Report a rejected or failed transaction (requires `correlationId`, optional `reason`) |
 
 ### Server-to-client messages
 
+All server-to-client messages are unicast to the originating session — no cross-session broadcast.
+
 | Type | Purpose |
 |---|---|
-| `connected` | Sent on successful WebSocket connection (unicast) |
-| `message` | Agent chat response (broadcast) |
-| `typing` | Typing indicator on/off (broadcast) |
-| `transaction` | Serialized Solana transaction for wallet signing (broadcast) |
-| `wallet_connected` | Wallet connection confirmed (broadcast) |
-| `wallet_disconnected` | Wallet disconnection confirmed (broadcast) |
-| `error` | Error response (unicast) |
+| `connected` | Sent on successful WebSocket connection |
+| `message` | Agent chat response |
+| `typing` | Typing indicator on/off |
+| `transaction` | Serialized Solana transaction for wallet signing (includes `correlationId`; includes `feeSol` in public mode when a fee is prepended) |
+| `wallet_connected` | Wallet connection confirmed |
+| `wallet_disconnected` | Wallet disconnection confirmed |
+| `error` | Error response |
 
 ### Authentication
 
@@ -458,10 +555,13 @@ location /ws {
 
 ### Authentication
 
-The current auth model is a single shared token (`WEB_CHANNEL_TOKEN`). For production with multiple users, consider:
-- Per-user JWT tokens validated on connection
-- Session-based authentication tied to your application's auth system
-- Rate limiting to prevent abuse
+The current auth model is a single shared token (`WEB_CHANNEL_TOKEN`, minimum 32 chars). For production:
+
+- **Prefer subprotocol or Authorization-header auth** over the query param. Browser clients should open the WebSocket with `new WebSocket(url, ['bearer', token])` so the token travels in the handshake and never appears in reverse-proxy access logs, browser history, or Referer headers. See [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md) § Authentication.
+- **Terminate TLS** (`wss://`) at a reverse proxy -- the handshake, including the subprotocol header, is only encrypted on the wire if the transport is encrypted.
+- **Use tokens ≥ 32 characters** (preferably a per-user JWT or session cookie tied to your app's auth system, not a single shared secret for all clients).
+- **Constrain `WS_ALLOWED_ORIGINS`** to exactly the origins allowed to open a WebSocket. Cross-site requests are rejected during the handshake.
+- The server applies per-session rate limits internally; put an application-layer gateway (Cloudflare, nginx limits, etc.) in front to also cap handshake attempts by IP.
 
 ### RPC endpoint
 

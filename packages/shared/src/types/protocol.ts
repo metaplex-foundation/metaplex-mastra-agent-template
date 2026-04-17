@@ -19,10 +19,24 @@ export interface ClientWalletDisconnect {
   type: 'wallet_disconnect';
 }
 
+export interface ClientTransactionResult {
+  type: 'tx_result';
+  correlationId: string;
+  signature: string;
+}
+
+export interface ClientTransactionError {
+  type: 'tx_error';
+  correlationId: string;
+  reason: string;
+}
+
 export type ClientMessage =
   | ClientChatMessage
   | ClientWalletConnect
-  | ClientWalletDisconnect;
+  | ClientWalletDisconnect
+  | ClientTransactionResult
+  | ClientTransactionError;
 
 // --- Server -> Client Messages ---
 
@@ -45,9 +59,11 @@ export interface ServerTyping {
 export interface ServerTransaction {
   type: 'transaction';
   transaction: string; // base64-encoded serialized Solana transaction
+  correlationId: string; // server-assigned, echoed in tx_result/tx_error
   message?: string;
   index?: number;
   total?: number;
+  feeSol?: number; // pre-computed fee included in this tx (public mode)
 }
 
 export interface ServerWalletConnected {
@@ -62,6 +78,7 @@ export interface ServerWalletDisconnected {
 export interface ServerError {
   type: 'error';
   error: string;
+  code?: string;
 }
 
 // --- Debug Events (Server -> Client) ---
@@ -69,7 +86,7 @@ export interface ServerError {
 export interface DebugStepStart {
   type: 'debug:step_start';
   step: number;
-  stepType: 'initial' | 'tool-result';
+  stepType: 'initial' | 'tool-result' | 'continue';
 }
 
 export interface DebugToolCall {

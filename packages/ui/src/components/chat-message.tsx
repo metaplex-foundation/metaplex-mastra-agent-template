@@ -1,15 +1,39 @@
 'use client';
 
 import Markdown from 'react-markdown';
+import type { AnchorHTMLAttributes, ReactNode } from 'react';
 import type { ChatMessage } from '@/hooks/use-plexchat';
 
 interface ChatMessageProps {
   message: ChatMessage;
 }
 
+// Schemes we refuse to render as live hyperlinks because they can execute
+// script or embed untrusted payloads. If the LLM emits one of these we
+// degrade gracefully to the raw text.
+const BLOCKED_URL_SCHEMES = /^\s*(javascript|data|vbscript|file):/i;
+
+interface SafeLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+  href?: string;
+  children?: ReactNode;
+}
+
+function SafeLink({ href, children, ...rest }: SafeLinkProps) {
+  if (!href || BLOCKED_URL_SCHEMES.test(href)) {
+    // Strip the dangerous href and render as plain text so the user can
+    // still see what the model emitted without clicking into it.
+    return <span {...rest}>{children}</span>;
+  }
+  return (
+    <a {...rest} href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
+
 export function ChatMessageBubble({ message }: ChatMessageProps) {
   const isUser = message.sender === 'user';
-  const isError = message.sender === 'agent' && message.content.startsWith('Error: ');
+  const isError = message.isError === true;
 
   if (isError) {
     return (
@@ -25,7 +49,7 @@ export function ChatMessageBubble({ message }: ChatMessageProps) {
               </svg>
             </span>
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-red-300">
-              {message.content.replace(/^Error: /, '')}
+              {message.content}
             </p>
           </div>
           <p className="mt-1 text-[10px] text-red-400/50">
@@ -53,11 +77,14 @@ export function ChatMessageBubble({ message }: ChatMessageProps) {
             {message.content}
           </p>
         ) : (
-          <div className="markdown-content text-sm leading-relaxed">
-            <Markdown>{message.content}</Markdown>
-            {message.isStreaming && (
-              <span className="inline-block h-3.5 w-1.5 animate-pulse bg-zinc-400 align-text-bottom" />
-            )}
+          <div className="markdown-content text-sm leading-relaxed break-words [overflow-wrap:anywhere]">
+            <Markdown components={{ a: SafeLink }}>{message.content}</Markdown>
+            {message.isStreaming === true ? (
+              <span
+                aria-hidden="true"
+                className="inline-block h-3.5 w-1.5 animate-pulse bg-zinc-400 align-text-bottom"
+              />
+            ) : null}
           </div>
         )}
         <p
