@@ -7,7 +7,6 @@ dist/
 **/.env.*.local
 *.tsbuildinfo
 .claude/
-docs/plans/
 agent-state.json
 .next/
 
