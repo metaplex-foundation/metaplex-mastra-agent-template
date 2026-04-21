@@ -154,10 +154,10 @@ Each WebSocket connection is its own session (isolated wallet, conversation hist
 ```
 AGENT_MODE=autonomous
 AGENT_KEYPAIR=<base58-encoded secret key>
-OWNER_WALLET=<base58 pubkey>   # required until the agent registers on-chain
+BOOTSTRAP_WALLET=<base58 pubkey>   # required until the agent registers on-chain
 ```
 
-The agent signs and submits transactions directly with its keypair. Only the on-chain asset owner (or `OWNER_WALLET` bootstrap fallback) is allowed to interact — non-owner WebSocket connections are rejected at the connection gate before the LLM is ever invoked.
+The agent signs and submits transactions directly with its keypair. Only the on-chain asset owner (or `BOOTSTRAP_WALLET` bootstrap fallback) is allowed to interact — non-owner WebSocket connections are rejected at the connection gate before the LLM is ever invoked.
 
 **Use cases:** portfolio rebalancer, trading bot, automated treasury manager, any agent that acts independently.
 
@@ -204,7 +204,7 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 
 | Variable | Description |
 |---|---|
-| `OWNER_WALLET` | Base58 pubkey of the agent owner. Bootstrap fallback used before on-chain registration. Required for autonomous mode pre-registration. |
+| `BOOTSTRAP_WALLET` | Base58 pubkey of the wallet allowed to bootstrap the agent. Required for autonomous mode pre-registration (server refuses to start without it). Once the agent is registered on-chain, the asset owner takes precedence and this value is no longer consulted. |
 | `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted to `agent-state.json` otherwise) |
 | `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
 | `TOKEN_OVERRIDE` | Target a specific token for buybacks (e.g. MPLX mint) instead of launching |

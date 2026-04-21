@@ -26,7 +26,7 @@ config({ path: findEnvFile(process.cwd()) });
 // Core:
 //   AGENT_MODE, LLM_MODEL, SOLANA_RPC_URL, AGENT_KEYPAIR,
 //   WEB_CHANNEL_PORT, WEB_CHANNEL_TOKEN, ASSISTANT_NAME, JUPITER_API_KEY,
-//   AGENT_FEE_SOL, TOKEN_OVERRIDE, OWNER_WALLET,
+//   AGENT_FEE_SOL, TOKEN_OVERRIDE, BOOTSTRAP_WALLET,
 //   AGENT_ASSET_ADDRESS, AGENT_TOKEN_MINT
 // Tuning:
 //   MAX_STEPS, ENABLE_DEBUG_EVENTS, MAX_CONNECTIONS
@@ -142,7 +142,7 @@ const envSchema = z.object({
   JUPITER_API_KEY: optional(z.string().min(1)),
   AGENT_FEE_SOL: z.coerce.number().min(0).max(1).default(0.001),
   TOKEN_OVERRIDE: optional(base58Address('TOKEN_OVERRIDE')),
-  OWNER_WALLET: optional(base58Address('OWNER_WALLET')),
+  BOOTSTRAP_WALLET: optional(base58Address('BOOTSTRAP_WALLET')),
   AGENT_ASSET_ADDRESS: optional(base58Address('AGENT_ASSET_ADDRESS')),
   AGENT_TOKEN_MINT: optional(base58Address('AGENT_TOKEN_MINT')),
   MAX_STEPS: z.coerce.number().min(1).max(50).default(10),
@@ -226,6 +226,25 @@ export function getConfig(): EnvConfig {
     }
     if (!_config.AGENT_TOKEN_MINT && state.agentTokenMint && BASE58_ADDRESS_RE.test(state.agentTokenMint)) {
       _config.AGENT_TOKEN_MINT = state.agentTokenMint;
+    }
+
+    // Autonomous mode pre-registration gate: without a resolved on-chain owner
+    // AND without a BOOTSTRAP_WALLET, nobody can connect to trigger the initial
+    // registration — the agent would be silently bricked. Fail fast with a
+    // clear error instead.
+    if (
+      _config.AGENT_MODE === 'autonomous' &&
+      !_config.AGENT_ASSET_ADDRESS &&
+      !_config.BOOTSTRAP_WALLET
+    ) {
+      throw new Error(
+        'BOOTSTRAP_WALLET is required in autonomous mode before the agent is ' +
+        'registered on-chain.\n' +
+        'Set it to the base58 pubkey of the wallet allowed to bootstrap the ' +
+        'agent and trigger initial registration.\n' +
+        'After registration (AGENT_ASSET_ADDRESS set), the on-chain asset ' +
+        'owner takes precedence and BOOTSTRAP_WALLET is no longer consulted.',
+      );
     }
   }
   return _config;

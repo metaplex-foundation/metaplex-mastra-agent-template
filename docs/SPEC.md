@@ -131,10 +131,10 @@ The **owner** of an agent is the wallet address that owns the agent's MPL Core a
 **Resolution order:**
 
 1. **On-chain asset** (primary) -- fetch the MPL Core asset at `agentAssetAddress` and read its `owner` field. Cached in memory after first fetch.
-2. **`OWNER_WALLET` env var** (bootstrap fallback) -- used only when `agentAssetAddress` is not yet set (agent has not registered). Required for autonomous mode pre-registration.
+2. **`BOOTSTRAP_WALLET` env var** (bootstrap fallback) -- used only when `agentAssetAddress` is not yet set (agent has not registered). Required for autonomous mode pre-registration; the server refuses to start in autonomous mode without either `BOOTSTRAP_WALLET` or a persisted `agentAssetAddress`.
 3. **`null`** -- no owner resolved. In autonomous mode, all interactions are rejected. In public mode, all tools are available (no owner-gated restrictions apply).
 
-**Bootstrap edge case:** Before registration, no on-chain asset exists, so there is no on-chain owner. The `OWNER_WALLET` env var bridges this gap. Once the agent registers and `agentAssetAddress` is persisted, the on-chain owner takes precedence and `OWNER_WALLET` is no longer consulted.
+**Bootstrap edge case:** Before registration, no on-chain asset exists, so there is no on-chain owner. The `BOOTSTRAP_WALLET` env var bridges this gap. Once the agent registers and `agentAssetAddress` is persisted, the on-chain owner takes precedence and `BOOTSTRAP_WALLET` is no longer consulted.
 
 ---
 
@@ -269,7 +269,7 @@ const defaultPolicy: AuthPolicy = (level, ctx) => {
 };
 ```
 
-The `ownerWallet !== null` guard fails closed when owner resolution has not yet succeeded (e.g., pre-registration without `OWNER_WALLET`, or a failed on-chain owner lookup). Without the guard, a `null === null` comparison would spuriously allow owner-level tools.
+The `ownerWallet !== null` guard fails closed when owner resolution has not yet succeeded (e.g., pre-registration without `BOOTSTRAP_WALLET`, or a failed on-chain owner lookup). Without the guard, a `null === null` comparison would spuriously allow owner-level tools.
 
 Developers can replace the policy entirely to implement custom authorization logic. Unknown auth levels are denied by default (fail-closed).
 
@@ -476,7 +476,7 @@ All configuration is via environment variables, validated at startup with Zod sc
 
 | Variable | Description |
 |---|---|
-| `OWNER_WALLET` | Base58 pubkey of the agent owner. Bootstrap fallback used before the agent registers on-chain. Required for autonomous mode pre-registration. Once registered, the on-chain asset owner takes precedence (see §3.4). |
+| `BOOTSTRAP_WALLET` | Base58 pubkey of the wallet allowed to bootstrap the agent. Required for autonomous mode pre-registration — the server refuses to start in autonomous mode without either `BOOTSTRAP_WALLET` or a persisted `AGENT_ASSET_ADDRESS`. Once registered, the on-chain asset owner takes precedence (see §3.4). |
 | `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted otherwise) |
 | `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
 | `TOKEN_OVERRIDE` | Target a specific token for buybacks (e.g., MPLX) instead of launching |
@@ -628,7 +628,7 @@ The template includes a layered authorization system (see §5.3) that enforces a
 
 - **Autonomous mode** is owner-gated at the connection level -- non-owners cannot interact
 - **Public mode** uses per-tool auth levels to restrict treasury operations to the owner
-- **Owner identity** is derived from the on-chain agent asset, with `OWNER_WALLET` as a bootstrap fallback
+- **Owner identity** is derived from the on-chain agent asset, with `BOOTSTRAP_WALLET` as a bootstrap fallback
 
 The WebSocket transport uses a single shared token (`WEB_CHANNEL_TOKEN`, ≥ 32 chars). For production deployments:
 
@@ -733,7 +733,7 @@ interface AgentContext {
   agentTokenMint: string | null;         // Agent's token mint address
   agentFeeSol: number;                   // Fee per transaction (public mode)
   tokenOverride: string | null;          // Override buyback target token
-  ownerWallet: string | null;            // Resolved owner address (from asset or OWNER_WALLET fallback)
+  ownerWallet: string | null;            // Resolved owner address (from asset or BOOTSTRAP_WALLET fallback)
 }
 
 // TransactionSender is session-scoped; its sendAndAwait returns Promise<string>

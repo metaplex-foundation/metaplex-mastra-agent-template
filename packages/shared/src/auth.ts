@@ -103,7 +103,7 @@ const inflightLookups: Map<string, Promise<string | null>> = new Map();
  *
  * Resolution order:
  *  1. On-chain asset owner (fetched via `fetchAsset`, cached in memory with TTL)
- *  2. `OWNER_WALLET` env var (bootstrap fallback, **never cached** — see H3)
+ *  2. `BOOTSTRAP_WALLET` env var (bootstrap fallback, **never cached** — see H3)
  *  3. `null` (no owner resolved — do NOT cache, retry on next call)
  *
  * The cache is keyed by `agentAssetAddress` and automatically invalidates
@@ -113,8 +113,9 @@ const inflightLookups: Map<string, Promise<string | null>> = new Map();
  * assets) are NEVER cached, so transient RPC blips don't lock the agent.
  *
  * H3 fix: when `agentAssetAddress === null` we do NOT cache the env-var
- * fallback — operators can rotate `OWNER_WALLET` at runtime and the change
- * is picked up immediately without waiting for TTL expiry or process restart.
+ * fallback — operators can rotate `BOOTSTRAP_WALLET` at runtime and the
+ * change is picked up immediately without waiting for TTL expiry or
+ * process restart.
  *
  * H4 fix: concurrent cache-miss lookups share a single in-flight promise
  * so `fetchAsset` is called at most once per missing cache entry.
@@ -125,7 +126,7 @@ export async function resolveOwner(agentAssetAddress: string | null): Promise<st
 
   // Pre-registration: always re-read env var, never cache (H3).
   if (agentAssetAddress === null) {
-    return config.OWNER_WALLET ?? null;
+    return config.BOOTSTRAP_WALLET ?? null;
   }
 
   // Post-registration: consult cache first.

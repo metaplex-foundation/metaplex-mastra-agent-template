@@ -211,13 +211,15 @@ export class PlexChatServer {
       if (this.ownerWallet) {
         console.log(`Agent owner: ${this.ownerWallet}`);
       } else if (config.AGENT_MODE === 'autonomous') {
+        // Config validation prevents reaching here without BOOTSTRAP_WALLET, so
+        // a null owner means the on-chain fetch failed (transient RPC).
         console.warn(
-          'WARNING: No owner resolved for autonomous agent. ' +
-          'Set OWNER_WALLET in .env or register the agent to enable owner gating.',
+          'WARNING: Owner could not be resolved from the on-chain asset. ' +
+          'Authorization will fail until resolution succeeds.',
         );
       } else if (config.AGENT_MODE === 'public' && !config.AGENT_ASSET_ADDRESS) {
         console.log(
-          'Hint: set OWNER_WALLET in .env (or register the agent) to enable owner-gated tools',
+          'Hint: set BOOTSTRAP_WALLET in .env (or register the agent) to enable owner-gated tools',
         );
       }
     });
@@ -1017,7 +1019,7 @@ export class PlexChatServer {
       if (!this.ownerWallet) {
         session.send({
           type: 'error',
-          error: 'No owner configured. Set OWNER_WALLET in .env or register the agent first.',
+          error: 'No owner could be resolved from the on-chain asset. Authorization is unavailable.',
           code: 'NO_OWNER',
         });
         return;

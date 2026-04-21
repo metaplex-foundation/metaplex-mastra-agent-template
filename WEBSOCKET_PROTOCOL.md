@@ -155,7 +155,7 @@ Notify the server that the user has connected a Solana wallet.
 **Behavior:**
 - The server stores the wallet address **on this session only** (per-connection, not global)
 - The server replies to the connecting client with a `wallet_connected` message (unicast; no broadcast to other sessions)
-- In autonomous mode, this triggers owner verification — the session is flagged `isOwnerVerified=true` only if the address matches the resolved owner (on-chain asset owner, or `OWNER_WALLET` fallback)
+- In autonomous mode, this triggers owner verification — the session is flagged `isOwnerVerified=true` only if the address matches the resolved owner (on-chain asset owner, or `BOOTSTRAP_WALLET` fallback)
 - Subsequent agent invocations on this session receive this wallet address automatically
 
 **Response:**
