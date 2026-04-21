@@ -365,14 +365,13 @@ In your UI deployment (e.g. Vercel), set:
 
 ```
 NEXT_PUBLIC_WS_HOST=your-agent-production.up.railway.app
-NEXT_PUBLIC_WS_PORT=443
 NEXT_PUBLIC_WS_TOKEN=<same WEB_CHANNEL_TOKEN as the server>
 NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
 ```
 
 Then update `WS_ALLOWED_ORIGINS` on the Railway service to include the UI's public origin.
 
-> **Note**: `packages/ui/src/app/env.ts` hard-codes `ws://` in `wsUrl()`. For a production UI talking to a Railway-hosted server you need `wss://`. Update that helper (or add a `NEXT_PUBLIC_WS_PROTOCOL` env var) as part of your production UI fork.
+`wsUrl()` auto-selects `wss://` for any non-localhost `NEXT_PUBLIC_WS_HOST` and drops the port when it's the default (`443` for `wss`, `80` for `ws`) — so a managed TLS host like Railway only needs `NEXT_PUBLIC_WS_HOST`. Override the protocol explicitly with `NEXT_PUBLIC_WS_PROTOCOL=ws|wss` if your setup needs it (e.g. a non-TLS internal hostname).
 
 #### Vercel setup (UI)
 
