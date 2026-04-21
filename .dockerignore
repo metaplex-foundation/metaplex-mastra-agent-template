@@ -38,5 +38,8 @@ meat-tasks
 !packages/*/README.md
 
 # The UI package deploys separately (e.g. Vercel). Excluding it keeps the
-# server image smaller and avoids pulling React/Next deps.
+# server image smaller and avoids pulling React/Next deps -- but we still
+# need the UI manifest so `pnpm install --frozen-lockfile` stays consistent
+# with pnpm-lock.yaml. Un-ignore just the package.json.
 packages/ui
+!packages/ui/package.json
