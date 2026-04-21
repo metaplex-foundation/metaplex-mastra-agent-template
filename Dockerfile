@@ -54,8 +54,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Run as a non-root user. Railway doesn't require this, but it's a good default
-# for any other host (k8s PSA, Fly machines, etc.).
-RUN useradd --system --uid 1001 --create-home agent
+# for any other host (k8s PSA, Fly machines, etc.). `WORKDIR` creates /app as
+# root-owned; chown it so the agent user can write agent-state.json there on
+# first-run registration.
+RUN useradd --system --uid 1001 --create-home agent \
+    && chown agent:agent /app
 
 COPY --from=builder --chown=agent:agent /app /app
 
