@@ -3,22 +3,16 @@ import { z } from 'zod';
 import { mintAndSubmitAgent } from '@metaplex-foundation/mpl-agent-registry';
 import type { SvmNetwork } from '@metaplex-foundation/mpl-agent-registry';
 import {
-  createNoopSigner,
-  publicKey as toPublicKey,
-  sol,
-} from '@metaplex-foundation/umi';
-import { transferSol } from '@metaplex-foundation/mpl-toolbox';
-import {
   createUmi,
+  ensureAgentFunded,
   err,
   getConfig,
-  getServerLimits,
   info,
   ok,
+  readAgentContext,
   setState,
   updateConfigFromState,
   clearOwnerCache,
-  submitOrSend,
   toToolError,
   type AgentContext,
   type ToolResult,
@@ -72,60 +66,12 @@ export const registerAgent = createTool({
     const run = async (): Promise<ToolResult<Record<string, unknown>>> => {
       try {
         const config = getConfig();
-        const limits = getServerLimits();
-        const fundingSol = limits.AGENT_FUNDING_SOL;
-        const fundingThresholdSol = limits.AGENT_FUNDING_THRESHOLD_SOL;
+        const agentContext = readAgentContext(ctx);
         const umi = createUmi();
 
-        // Check agent keypair balance before attempting registration
-        const balance = await umi.rpc.getBalance(umi.identity.publicKey, { commitment: 'confirmed' });
-        const balanceSol = Number(balance.basisPoints) / 1e9;
-
-        if (balanceSol < fundingThresholdSol) {
-          const agentAddress = umi.identity.publicKey;
-
-          // Public mode with wallet connected: send funding tx to user and await
-          // signature, then continue directly to registration in the same call.
-          if (config.AGENT_MODE === 'public' && ctx?.get('walletAddress') && ctx?.get('transactionSender')) {
-            const walletAddress = ctx.get('walletAddress')!;
-            const walletSigner = createNoopSigner(toPublicKey(walletAddress));
-
-            const builder = transferSol(umi, {
-              source: walletSigner,
-              destination: agentAddress,
-              amount: sol(fundingSol),
-            });
-
-            const context: AgentContext = {
-              walletAddress,
-              transactionSender: ctx.get('transactionSender'),
-              agentMode: 'public',
-              agentAssetAddress: null,
-              agentTokenMint: ctx.get('agentTokenMint') ?? null,
-              agentFeeSol: 0,
-              tokenOverride: ctx.get('tokenOverride') ?? null,
-              ownerWallet: ctx.get('ownerWallet') ?? null,
-            };
-
-            // This awaits the user's signature (and confirmation from the frontend)
-            await submitOrSend(umi, builder, context, {
-              message: `Fund agent keypair for registration (${fundingSol} SOL)`,
-            });
-
-            // Poll briefly for the funded balance to be visible before proceeding
-            for (let i = 0; i < 10; i++) {
-              const updated = await umi.rpc.getBalance(umi.identity.publicKey, { commitment: 'confirmed' });
-              if (Number(updated.basisPoints) / 1e9 >= fundingThresholdSol) break;
-              await new Promise((r) => setTimeout(r, 1000));
-            }
-            // fall through to registration
-          } else {
-            // No wallet or autonomous mode: tell user to fund manually
-            return err(
-              'INSUFFICIENT_FUNDS',
-              `Agent keypair has insufficient SOL for registration (${balanceSol.toFixed(4)} SOL). Please send at least ${fundingSol} SOL to: ${agentAddress}`,
-            );
-          }
+        const funding = await ensureAgentFunded(umi, agentContext);
+        if (!funding.funded) {
+          return err('INSUFFICIENT_FUNDS', funding.reason);
         }
 
         let network: SvmNetwork = 'solana-mainnet';

@@ -9,7 +9,8 @@
     "dev:all": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && pnpm --filter @metaplex-agent/server --filter @metaplex-agent/ui dev",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
-    "typecheck": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && pnpm -r typecheck"
+    "typecheck": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && pnpm -r typecheck",
+    "bootstrap": "tsx scripts/bootstrap.ts"
   },
   "engines": {
     "node": ">=20"

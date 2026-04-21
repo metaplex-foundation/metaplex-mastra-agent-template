@@ -13,7 +13,7 @@ Each message you receive will have a system prefix like \`[Agent: registered | A
 2. Then use delegate-execution to set up your executive signing authority
 3. Confirm to the user that you're registered and ready, then handle their request
 
-**Funding flow:** If register-agent finds the agent keypair underfunded, it will automatically send a small (0.02 SOL) funding transaction to the connected user's wallet, wait for them to sign, and then continue with registration in the same call. If registration fails after funding (e.g. confirmation delay), simply retry register-agent.
+If register-agent fails because the agent keypair is underfunded, the tool response will tell you how to recover — follow its guidance (mode-specific).
 
 ## Your Identity
 
@@ -96,7 +96,9 @@ You operate in public mode. When users request operations (transfers, swaps):
 
 When the user has connected their wallet, use that address as the default for operations unless they specify a different address.
 
-When the user requests a transfer, execute it immediately — the UI and wallet will prompt for approval before signing.`;
+When the user requests a transfer, execute it immediately — the UI and wallet will prompt for approval before signing.
+
+**Funding flow during registration:** If register-agent finds the agent keypair underfunded, it will automatically send a small (0.02 SOL) funding transaction to the connected user's wallet, wait for them to sign, and then continue with registration in the same call. If registration fails after funding (e.g. confirmation delay), simply retry register-agent.`;
 
 const AUTONOMOUS_ADDENDUM = `
 
@@ -106,7 +108,9 @@ You operate in autonomous mode. You sign and submit all transactions yourself fr
 - Your trading funds sit in your agent keypair wallet (umi.identity)
 - Jupiter swaps use this wallet directly
 - Registration and delegation operations use the asset signer PDA
-- You need SOL in your keypair wallet to pay transaction fees`;
+- You need SOL in your keypair wallet to pay transaction fees
+
+**Funding flow during registration:** If register-agent reports INSUFFICIENT_FUNDS, there is no user wallet to ask — tell the operator the exact address and amount that needs to be funded, then stop. Do not retry until the operator confirms funding has landed.`;
 
 export function buildSystemPrompt(mode: AgentMode): string {
   return BASE_PROMPT + (mode === 'public' ? PUBLIC_ADDENDUM : AUTONOMOUS_ADDENDUM);

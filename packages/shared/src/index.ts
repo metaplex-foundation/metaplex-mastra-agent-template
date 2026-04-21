@@ -5,6 +5,7 @@ export * from './server-limits.js';
 export * from './error-codes.js';
 export * from './umi.js';
 export * from './transaction.js';
+export * from './funding.js';
 export * from './execute.js';
 export * from './jupiter.js';
 export * from './state.js';

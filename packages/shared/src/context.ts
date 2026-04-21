@@ -17,10 +17,20 @@ export function readAgentContext(ctx: any): AgentContext {
     }
   };
 
+  // agentMode has no safe default: it's always populated by the server from
+  // validated config, and a silent fallback would hide wiring bugs in custom
+  // runtimes (e.g. autonomous worker loops that forget to set it).
+  const agentMode = ctx?.get?.('agentMode');
+  if (agentMode !== 'public' && agentMode !== 'autonomous') {
+    throw new Error(
+      "AgentContext is missing 'agentMode'. Construct the RequestContext with ['agentMode', 'public'] or ['agentMode', 'autonomous'] before invoking tools.",
+    );
+  }
+
   return {
     walletAddress: get<string | null>('walletAddress', null),
     transactionSender: get<AgentContext['transactionSender']>('transactionSender', null),
-    agentMode: get<AgentContext['agentMode']>('agentMode', 'public'),
+    agentMode,
     agentAssetAddress: get<string | null>('agentAssetAddress', null),
     agentTokenMint: get<string | null>('agentTokenMint', null),
     agentFeeSol: get<number>('agentFeeSol', 0.001),

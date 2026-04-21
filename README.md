@@ -6,6 +6,28 @@ Out of the box you get a working Solana agent with balance queries, SOL/token tr
 
 ---
 
+## Which mode am I?
+
+This template supports two operating modes. Pick one before you go further — almost every decision downstream flows from it.
+
+| | **Public mode** | **Autonomous mode** |
+|---|---|---|
+| **Who signs transactions** | End users (browser wallet) | The agent (its own keypair) |
+| **Typical shape** | Multi-user chatbot behind a UI | Headless daemon / cron / trading bot |
+| **You want this if** | Users interact via chat and approve each tx in Phantom / Solflare | The agent runs on its own schedule and nobody is in the loop |
+| **Example products** | Wallet cleanup bot, mint helper, token launch assistant, portfolio advisor | Treasury rebalancer, strategy bot, automated buybacks, scheduled payouts |
+| **`.env` setting** | `AGENT_MODE=public` | `AGENT_MODE=autonomous` + `BOOTSTRAP_WALLET=<pubkey>` |
+| **UI package useful?** | Yes — drop-in chat interface | Usually no — consider deleting `packages/ui/` |
+| **Deployment shape** | Long-lived WS server behind nginx/TLS, public ingress | Background worker, no public ingress, keypair in a secrets manager |
+
+**Unsure? Pick `public` — it's the default and the built-in UI lets you see everything working in minutes.** You can switch later by editing one env var.
+
+**Want to prune the template for a single-mode fork?** Run `pnpm bootstrap` and the script will delete the code paths, env vars, and packages that don't apply to your chosen mode.
+
+See [Agent Modes](#agent-modes) below for the full architectural detail, and [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for production recipes per mode.
+
+---
+
 ## Architecture
 
 ```

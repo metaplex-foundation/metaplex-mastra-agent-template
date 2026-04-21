@@ -52,13 +52,15 @@ export const transferToken = createTool({
     const context = readAgentContext(requestContext);
 
     try {
-      const umi = createUmi();
+      if (!context.walletAddress) {
+        return err(
+          'INVALID_INPUT',
+          'No wallet connected. Ask the user to connect a wallet before initiating a transfer.',
+        );
+      }
 
-      // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
-      // In autonomous mode, umi.identity is already the agent's keypair.
-      const authority = context.agentMode === 'public' && context.walletAddress
-        ? createNoopSigner(publicKey(context.walletAddress))
-        : umi.identity;
+      const umi = createUmi();
+      const authority = createNoopSigner(publicKey(context.walletAddress));
 
       const mintPk = publicKey(mint);
       const destOwner = publicKey(destination);

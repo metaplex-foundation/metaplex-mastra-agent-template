@@ -41,13 +41,15 @@ export const transferSol = createTool({
     const context = readAgentContext(requestContext);
 
     try {
-      const umi = createUmi();
+      if (!context.walletAddress) {
+        return err(
+          'INVALID_INPUT',
+          'No wallet connected. Ask the user to connect a wallet before initiating a transfer.',
+        );
+      }
 
-      // In public mode, use a NoopSigner for the connected wallet (they sign on frontend).
-      // In autonomous mode, umi.identity is already the agent's keypair.
-      const source = context.agentMode === 'public' && context.walletAddress
-        ? createNoopSigner(publicKey(context.walletAddress))
-        : umi.identity;
+      const umi = createUmi();
+      const source = createNoopSigner(publicKey(context.walletAddress));
 
       const builder = transferSolIx(umi, {
         source,
