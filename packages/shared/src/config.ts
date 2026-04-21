@@ -66,6 +66,16 @@ const base58Address = (fieldName: string) =>
     }, `${fieldName} must decode to a 32-byte Solana public key`);
 
 /**
+ * Wraps an optional schema so that empty strings coming from dotenv (e.g. a
+ * `FOO=` line left empty in .env) are treated as missing. Without this, zod's
+ * `.optional()` accepts `""` as present and the inner refinements fail — which
+ * breaks every fresh fork of this template where users copy .env.example
+ * verbatim and leave the optional fields empty.
+ */
+const optional = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+
+/**
  * AGENT_KEYPAIR must be either:
  *   - a 64-byte base58-encoded secret key, OR
  *   - a JSON array of 64 numbers (0-255), matching @solana/web3.js keypair.json format.
@@ -129,12 +139,12 @@ const envSchema = z.object({
   WEB_CHANNEL_PORT: z.coerce.number().default(3002),
   WEB_CHANNEL_TOKEN: webChannelTokenSchema,
   ASSISTANT_NAME: z.string().default('Agent'),
-  JUPITER_API_KEY: z.string().optional(),
+  JUPITER_API_KEY: optional(z.string().min(1)),
   AGENT_FEE_SOL: z.coerce.number().min(0).max(1).default(0.001),
-  TOKEN_OVERRIDE: base58Address('TOKEN_OVERRIDE').optional(),
-  OWNER_WALLET: base58Address('OWNER_WALLET').optional(),
-  AGENT_ASSET_ADDRESS: base58Address('AGENT_ASSET_ADDRESS').optional(),
-  AGENT_TOKEN_MINT: base58Address('AGENT_TOKEN_MINT').optional(),
+  TOKEN_OVERRIDE: optional(base58Address('TOKEN_OVERRIDE')),
+  OWNER_WALLET: optional(base58Address('OWNER_WALLET')),
+  AGENT_ASSET_ADDRESS: optional(base58Address('AGENT_ASSET_ADDRESS')),
+  AGENT_TOKEN_MINT: optional(base58Address('AGENT_TOKEN_MINT')),
   MAX_STEPS: z.coerce.number().min(1).max(50).default(10),
   ENABLE_DEBUG_EVENTS: z.preprocess(
     (v) => v === undefined ? true : v === 'true' || v === '1',
