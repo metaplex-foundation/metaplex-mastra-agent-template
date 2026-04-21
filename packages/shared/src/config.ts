@@ -136,7 +136,12 @@ const envSchema = z.object({
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
   AGENT_KEYPAIR: agentKeypairSchema,
-  WEB_CHANNEL_PORT: z.coerce.number().default(3002),
+  WEB_CHANNEL_PORT: z.preprocess(
+    // Fall back to PORT (injected by Railway, Render, Fly, Heroku, etc.) when
+    // WEB_CHANNEL_PORT isn't explicitly set. Keeps local dev unchanged.
+    (v) => (v === undefined || v === '' ? process.env.PORT : v),
+    z.coerce.number().default(3002),
+  ),
   WEB_CHANNEL_TOKEN: webChannelTokenSchema,
   ASSISTANT_NAME: z.string().default('Agent'),
   JUPITER_API_KEY: optional(z.string().min(1)),

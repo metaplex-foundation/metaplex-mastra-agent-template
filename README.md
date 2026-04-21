@@ -561,6 +561,8 @@ This compiles TypeScript to JavaScript in each package's `dist/` folder, then st
 
 ## Deployment Notes
 
+For end-to-end recipes per mode (nginx examples, Dockerfiles, Kubernetes manifests) see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md). A step-by-step **Railway** deploy (using the `Dockerfile` and `railway.json` at the repo root) lives in that file too — it's the fastest path from `git push` to a running public-mode agent.
+
 ### Use WSS in production
 
 The WebSocket server runs unencrypted (`ws://`) by default. In production, terminate TLS at a reverse proxy:

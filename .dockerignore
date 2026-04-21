@@ -1,0 +1,42 @@
+# Keep the Docker build context small and predictable.
+
+# Node / pnpm
+node_modules
+**/node_modules
+
+# Build artifacts
+dist
+**/dist
+.next
+**/.next
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local env and secrets -- pass these via the platform's env/secret store
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Per-process state file -- the container regenerates or reads from env
+agent-state.json
+
+# VCS / CI / editors
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+# Docs and planning material -- not needed at runtime
+docs
+meat-tasks
+*.md
+!packages/*/README.md
+
+# The UI package deploys separately (e.g. Vercel). Excluding it keeps the
+# server image smaller and avoids pulling React/Next deps.
+packages/ui

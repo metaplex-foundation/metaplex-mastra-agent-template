@@ -280,6 +280,114 @@ CMD ["node", "packages/server/dist/index.js"]
 
 ---
 
+## Railway (step-by-step, both modes)
+
+[Railway](https://railway.com) is the quickest path from `git push` to a running agent. The repo ships a `Dockerfile` and `railway.json` at the root so Railway builds and runs `packages/server` without any extra configuration. The UI package is **not** deployed by this recipe — put it on Vercel (or wherever you prefer) and point it at the Railway-hosted WSS URL.
+
+### What's included in the template
+
+- `Dockerfile` — multi-stage build that compiles `shared` → `core` → `server` and ships a non-root runtime image. Works on Railway, Fly, Render, k8s, or `docker run` locally.
+- `.dockerignore` — keeps `node_modules`, `.env`, the UI package, and other local-only files out of the build context.
+- `railway.json` — tells Railway to use the Dockerfile, sets the start command, and configures a restart policy. Railway reads this automatically.
+
+The server reads `WEB_CHANNEL_PORT`, falling back to `PORT` (which Railway injects) — so you don't need to override the port in the dashboard.
+
+### Prerequisites
+
+- A Railway account and the [Railway CLI](https://docs.railway.com/guides/cli) (`npm i -g @railway/cli`), or just the web dashboard.
+- Your agent's secrets ready to paste: `AGENT_KEYPAIR`, `WEB_CHANNEL_TOKEN`, `SOLANA_RPC_URL`, and the LLM API key matching your `LLM_MODEL`.
+- For autonomous mode: `BOOTSTRAP_WALLET` (the pubkey that will trigger first-time registration).
+
+### Step 1 — Create the project
+
+From the dashboard: **New Project → Deploy from GitHub repo → pick your fork**. Railway detects `railway.json` and queues the first build. (CLI equivalent: `railway login && railway init && railway up`.)
+
+### Step 2 — Set environment variables
+
+In the service's **Variables** tab, add the minimum set:
+
+```
+# Required (both modes)
+AGENT_MODE=public                     # or autonomous
+AGENT_KEYPAIR=<base58 secret or JSON byte array>
+WEB_CHANNEL_TOKEN=<>=32 chars; openssl rand -hex 24>
+SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=...
+ANTHROPIC_API_KEY=<your key>           # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY
+WS_ALLOWED_ORIGINS=https://your-ui-domain.com
+
+# Public mode
+AGENT_FEE_SOL=0.001
+
+# Autonomous mode
+BOOTSTRAP_WALLET=<owner pubkey>
+```
+
+See [`.env.example`](../.env.example) for the full catalog of tunables (`MAX_CONNECTIONS`, `MAX_MESSAGE_CONTENT`, `MAX_RPC_TIME_BUDGET_MS`, etc.).
+
+**Do not** set `WEB_CHANNEL_PORT` — let the server pick up Railway's `PORT`.
+
+**Treat `AGENT_KEYPAIR` as a privileged secret** in autonomous mode. It has direct access to the agent's funds; fund the wallet with only what it needs.
+
+### Step 3 — Expose the service
+
+In **Settings → Networking → Public Networking**, click **Generate Domain**. Railway hands you a URL like `your-agent-production.up.railway.app`. The WebSocket endpoint is `wss://your-agent-production.up.railway.app` (TLS is terminated at Railway's edge — the server keeps speaking plain `ws://` internally).
+
+For **autonomous mode**, skip this step. Autonomous agents don't need public ingress — leave networking closed and connect only via the Railway **Private Networking** hostname if you need to reach it from another service in the same project.
+
+### Step 4 — Deploy and tail logs
+
+Railway auto-deploys on every push to the tracked branch. Tail the build and runtime logs in the **Deployments** tab (or `railway logs` via CLI). You should see:
+
+```
+PlexChat WebSocket server running on ws://localhost:<PORT>
+Agent mode: public
+Agent name: Agent
+RPC: https://...
+```
+
+### Step 5 — Register the agent (first run)
+
+Before registration the agent has no on-chain asset. In **public mode**, the first user wallet that connects triggers `register-agent`; the server then writes `agentAssetAddress` and `agentTokenMint` into `agent-state.json`. In **autonomous mode**, only the `BOOTSTRAP_WALLET` can trigger it.
+
+**Important for Railway**: Railway's container filesystem is ephemeral — `agent-state.json` is **wiped on every deploy**. Once the agent is registered, copy the addresses out of the logs and set them as env vars so subsequent deploys skip re-registration:
+
+```
+AGENT_ASSET_ADDRESS=<address from logs>
+AGENT_TOKEN_MINT=<address from logs>   # only if launch-token ran
+```
+
+The config layer treats these env vars as authoritative when set, so the missing state file becomes a non-issue. (Alternatively, attach a [Railway volume](https://docs.railway.com/reference/volumes) at `/app` — but the env-var approach is simpler and avoids volume lifecycle edge cases.)
+
+### Step 6 — Point the UI at the deployed server
+
+In your UI deployment (e.g. Vercel), set:
+
+```
+NEXT_PUBLIC_WS_HOST=your-agent-production.up.railway.app
+NEXT_PUBLIC_WS_PORT=443
+NEXT_PUBLIC_WS_TOKEN=<same WEB_CHANNEL_TOKEN as the server>
+NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
+```
+
+Then update `WS_ALLOWED_ORIGINS` on the Railway service to include the UI's public origin.
+
+> **Note**: `packages/ui/src/app/env.ts` hard-codes `ws://` in `wsUrl()`. For a production UI talking to a Railway-hosted server you need `wss://`. Update that helper (or add a `NEXT_PUBLIC_WS_PROTOCOL` env var) as part of your production UI fork.
+
+### Scaling and limits
+
+- **Replicas**: Railway can run multiple replicas of a service (paid plans). The server is stateless *per session* but sticky WebSocket routing is required — see "Scaling notes" above. Railway's proxy doesn't currently guarantee WebSocket stickiness by source IP, so for multi-replica deployments you may want to front it with Cloudflare or add a session-affinity layer of your own.
+- **Memory**: start with 512 MB; scale up if `@mastra/core` + the agent history pushes you over. The default `MAX_CONNECTIONS=10` keeps single-replica memory bounded.
+- **Idle**: public-mode agents need to stay up to accept sessions. Disable any idle-sleep behavior on your Railway service's plan.
+- **Cost**: the biggest variable is the LLM spend, not Railway. Set `MAX_STEPS` and `MAX_RPC_TIME_BUDGET_MS` aggressively if you're letting the public internet chat with the agent.
+
+### Autonomous-mode caveat
+
+If you deploy autonomous mode on Railway, **leave public networking off** and treat the service like a headless worker. The server package still listens on a port (which Railway assigns), but without a public domain nobody outside the project can reach it. The owner-gated WebSocket is only for manual inspection from inside the project.
+
+For a pure cron-shape autonomous agent (no WebSocket at all), replace `packages/server` with a worker loop per the example above — Railway will happily run that too; just keep the Dockerfile pointed at your worker's entry.
+
+---
+
 ## Observability (both modes)
 
 The server emits structured `console.log` events and, when `ENABLE_DEBUG_EVENTS=true`, streams `debug:*` events over the WebSocket. In production:
