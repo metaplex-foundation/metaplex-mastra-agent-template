@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "next build",
+    "build": "pnpm --filter @metaplex-agent/shared build && next build",
     "start": "next start -p 3001",
     "clean": "rm -rf .next",
     "typecheck": "tsc --noEmit"

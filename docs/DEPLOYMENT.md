@@ -290,7 +290,7 @@ CMD ["node", "packages/server/dist/index.js"]
 - `.dockerignore` — keeps `node_modules`, `.env`, the UI package, and other local-only files out of the build context.
 - `railway.json` — tells Railway to use the Dockerfile, sets the start command, and configures a restart policy. Railway reads this automatically.
 
-The server reads `WEB_CHANNEL_PORT`, falling back to `PORT` (which Railway injects) — so you don't need to override the port in the dashboard.
+The server reads `WEB_CHANNEL_PORT` and falls back to `PORT` if unset. Railway's domain-generation step insists on a fixed target port, so the cleanest setup is to pin `WEB_CHANNEL_PORT=3002` in the service's variables and point the generated domain at `3002` — see Step 2.
 
 ### Prerequisites
 
@@ -311,6 +311,7 @@ In the service's **Variables** tab, add the minimum set:
 AGENT_MODE=public                     # or autonomous
 AGENT_KEYPAIR=<base58 secret or JSON byte array>
 WEB_CHANNEL_TOKEN=<>=32 chars; openssl rand -hex 24>
+WEB_CHANNEL_PORT=3002                  # pin so Railway's domain target matches
 SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=...
 ANTHROPIC_API_KEY=<your key>           # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY
 WS_ALLOWED_ORIGINS=https://your-ui-domain.com
@@ -324,13 +325,13 @@ BOOTSTRAP_WALLET=<owner pubkey>
 
 See [`.env.example`](../.env.example) for the full catalog of tunables (`MAX_CONNECTIONS`, `MAX_MESSAGE_CONTENT`, `MAX_RPC_TIME_BUDGET_MS`, etc.).
 
-**Do not** set `WEB_CHANNEL_PORT` — let the server pick up Railway's `PORT`.
+**Pin `WEB_CHANNEL_PORT=3002`.** Railway's "Generate Domain" step asks for a fixed target port; pinning the binding port matches it and removes the dynamic-`PORT` guesswork.
 
 **Treat `AGENT_KEYPAIR` as a privileged secret** in autonomous mode. It has direct access to the agent's funds; fund the wallet with only what it needs.
 
 ### Step 3 — Expose the service
 
-In **Settings → Networking → Public Networking**, click **Generate Domain**. Railway hands you a URL like `your-agent-production.up.railway.app`. The WebSocket endpoint is `wss://your-agent-production.up.railway.app` (TLS is terminated at Railway's edge — the server keeps speaking plain `ws://` internally).
+In **Settings → Networking → Public Networking**, click **Generate Domain** and set the target port to **3002** (matching `WEB_CHANNEL_PORT`). Railway hands you a URL like `your-agent-production.up.railway.app`. The WebSocket endpoint is `wss://your-agent-production.up.railway.app` (TLS is terminated at Railway's edge — the server keeps speaking plain `ws://` internally).
 
 For **autonomous mode**, skip this step. Autonomous agents don't need public ingress — leave networking closed and connect only via the Railway **Private Networking** hostname if you need to reach it from another service in the same project.
 
@@ -372,6 +373,17 @@ NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
 Then update `WS_ALLOWED_ORIGINS` on the Railway service to include the UI's public origin.
 
 > **Note**: `packages/ui/src/app/env.ts` hard-codes `ws://` in `wsUrl()`. For a production UI talking to a Railway-hosted server you need `wss://`. Update that helper (or add a `NEXT_PUBLIC_WS_PROTOCOL` env var) as part of your production UI fork.
+
+#### Vercel setup (UI)
+
+Import the repo in Vercel and set:
+
+- **Framework preset**: Next.js (auto-detected)
+- **Root Directory**: `packages/ui`
+- **Install Command**: leave default (`pnpm install` at repo root — Vercel picks this up from `pnpm-workspace.yaml`)
+- **Build Command**: leave default (`pnpm run build`). The UI's `build` script already compiles `@metaplex-agent/shared` first — Vercel doesn't know about workspace deps, so without that chain the build fails with `Cannot find module '@metaplex-agent/shared'`.
+
+You can safely ignore the `pino-pretty` warning from `@walletconnect/logger` — it's an optional peer dep only used for dev-mode log formatting.
 
 ### Scaling and limits
 
