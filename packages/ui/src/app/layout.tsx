@@ -3,8 +3,8 @@ import { Providers } from './providers';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'PlexChat Test UI',
-  description: 'Test UI for PlexChat WebSocket agent',
+  title: 'Agent',
+  description: 'Chat with a Metaplex-powered Solana agent',
 };
 
 export default function RootLayout({

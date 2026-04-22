@@ -78,9 +78,18 @@ export default function Home() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <h1 className="text-lg font-semibold text-white">PlexChat</h1>
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 bg-gradient-to-b from-zinc-900/60 to-zinc-950 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/metaplex-logo-white.png"
+              alt="Metaplex"
+              className="h-4 w-auto"
+            />
+            <span className="h-5 w-px bg-zinc-700" aria-hidden="true" />
+            <span className="text-sm font-medium text-zinc-400">Agent</span>
+          </div>
           <ConnectionStatus isConnected={isConnected} isReconnecting={isReconnecting} />
         </div>
         <div className="flex flex-wrap items-center gap-2">

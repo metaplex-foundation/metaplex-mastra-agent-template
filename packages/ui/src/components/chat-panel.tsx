@@ -105,15 +105,11 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, isWalletConnec
           {messages.length === 0 ? (
             <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-4">
               <div className="text-center">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-600/20">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-indigo-400">
-                    <path d="M12 2C6.48 2 2 6.48 2 12C2 13.85 2.5 15.55 3.35 17L2 22L7 20.65C8.45 21.5 10.15 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M8 12H8.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    <path d="M12 12H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    <path d="M16 12H16.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                  </svg>
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/metaplex-mark.png" alt="Metaplex" className="h-10 w-10 rounded-lg" />
                 </div>
-                <h2 className="text-lg font-semibold text-white">Start a conversation</h2>
+                <h2 className="text-lg font-semibold text-white">How can I help?</h2>
                 <p className="mt-1 text-sm text-zinc-400">
                   Ask a question or try one of the suggestions below.
                 </p>
@@ -191,8 +187,20 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, isWalletConnec
               </svg>
             </button>
           </div>
-          <p className="mt-1.5 text-center text-[11px] text-zinc-600">
-            Press Enter to send, Shift+Enter for new line
+          <p className="mt-1.5 flex items-center justify-center gap-1.5 text-center text-[11px] text-zinc-600">
+            <span>Press Enter to send, Shift+Enter for new line</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              Powered by{' '}
+              <a
+                href="https://metaplex.com"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-zinc-500 underline-offset-2 transition-colors hover:text-zinc-300 hover:underline"
+              >
+                Metaplex
+              </a>
+            </span>
           </p>
         </div>
       </div>
