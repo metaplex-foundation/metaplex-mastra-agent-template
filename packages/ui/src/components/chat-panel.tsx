@@ -105,9 +105,9 @@ export function ChatPanel({ messages, isAgentTyping, isConnected, isWalletConnec
           {messages.length === 0 ? (
             <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 px-4">
               <div className="text-center">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-900 ring-1 ring-zinc-800">
+                <div className="mx-auto mb-8 flex h-44 w-44 items-center justify-center overflow-hidden rounded-[2rem] bg-zinc-900 ring-1 ring-zinc-800">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/metaplex-mark.png" alt="Metaplex" className="h-10 w-10 rounded-lg" />
+                  <img src="/metaplex-mark.png" alt="Metaplex" className="h-full w-full object-cover" />
                 </div>
                 <h2 className="text-lg font-semibold text-white">How can I help?</h2>
                 <p className="mt-1 text-sm text-zinc-400">
