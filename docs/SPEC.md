@@ -1,8 +1,10 @@
 # Metaplex Agent Template - Product Requirements Document
 
-**Version:** 1.1
-**Last Updated:** 2026-04-17
+**Version:** 1.2
+**Last Updated:** 2026-04-24
 **Status:** Living Document
+
+This document is the canonical spec: it should contain enough detail to reconstruct equivalent working code from scratch. When implementation and spec disagree, treat the repository as source of truth and patch this document.
 
 ---
 
@@ -36,14 +38,30 @@ Out of the box, developers get a working agent that can check balances, transfer
 
 ### 2.1 Monorepo Structure
 
+pnpm workspace (`pnpm-workspace.yaml` declares `packages/*`). Node ≥ 20, pnpm ≥ 9, TypeScript strict (`ES2022`, `module: ESNext`, `moduleResolution: bundler`). Root `.npmrc` sets `shamefully-hoist=true` so Umi's transitive deps resolve correctly.
+
 ```
 metaplex-agent-template/
   packages/
     shared/    @metaplex-agent/shared    Foundation layer (config, Umi, types, helpers)
     core/      @metaplex-agent/core      Agent definition, system prompt, tool registry
-    server/    @metaplex-agent/server     WebSocket server (PlexChat protocol)
-    ui/        @metaplex-agent/ui         Next.js test frontend
+    server/    @metaplex-agent/server    WebSocket server (PlexChat protocol)
+    ui/        @metaplex-agent/ui        Next.js test frontend
 ```
+
+Additional root-level artifacts that are part of the template contract:
+
+| Path | Purpose |
+|---|---|
+| `.env` / `.env.example` | Workspace-root env. Loaded by `shared/config.ts` via a walk-up search from `cwd`. |
+| `agent-state.json` | Auto-persisted agent identity (asset address, token mint). Written atomically with mode `0600`, gitignored. Anchored to the pnpm workspace root. |
+| `Dockerfile` | Multi-stage image (builder + runtime) for the server. Installs with pnpm, builds `shared → core → server`, runs as non-root `agent` user on port 3002. |
+| `.dockerignore` | Excludes `node_modules`, `dist`, `.env`, `agent-state.json`, docs, and the UI package sources (UI deploys separately). |
+| `railway.json` | Railway build/deploy config pointing at the `Dockerfile`. |
+| `scripts/bootstrap.ts` | Fork-time template pruner (`pnpm bootstrap [public\|autonomous]`). See §11.4. |
+| `docs/SPEC.md` | This document. |
+| `docs/DEPLOYMENT.md` | Per-mode deployment recipes (nginx, Docker, Railway, hardening checklists). |
+| `WEBSOCKET_PROTOCOL.md` | Wire-level protocol reference (message schemas, examples, error codes). |
 
 ### 2.2 Dependency Graph
 
@@ -52,10 +70,10 @@ ui ──► shared (devDependency for types)
 server ──► core ──► shared
 ```
 
-- `shared` has zero internal dependencies (it is the foundation)
-- `core` depends on `shared` for config, Umi factory, transaction helpers, and types
-- `server` depends on `core` (agent instance) and `shared` (config, types)
-- `ui` depends on `shared` as a devDependency (protocol types only)
+- `shared` has zero internal dependencies (it is the foundation).
+- `core` depends on `shared` for config, Umi factory, transaction helpers, types, and `withAuth`.
+- `server` depends on `core` (agent factory + tool-name exports) and `shared` (config, limits, types, owner resolver).
+- `ui` depends on `shared` as a devDependency (protocol types only; no runtime import of server-only code).
 
 ### 2.3 Data Flow
 
@@ -236,7 +254,70 @@ For consistent tool output shape, use the `ok()`, `info()`, and `err()` helpers 
 
 This gives the LLM a reliable `status` field to branch on and makes error handling uniform across tools.
 
-### 5.3 Tool Authorization
+Wire tools into the registry with `withAuth(tool, level)` so the auth layer fires before `execute` (see §5.4). The canonical per-tool mapping:
+
+```typescript
+// packages/core/src/tools/shared/index.ts
+export const sharedTools = {
+  getBalance:        withAuth(getBalance,        'public'),
+  getTokenBalances:  withAuth(getTokenBalances,  'public'),
+  getTransaction:    withAuth(getTransaction,    'public'),
+  getTokenPrice:     withAuth(getTokenPrice,     'public'),
+  getTokenMetadata:  withAuth(getTokenMetadata,  'public'),
+  sleep:             withAuth(sleep,             'public'),
+  registerAgent:     withAuth(registerAgent,     'owner'),
+  delegateExecution: withAuth(delegateExecution, 'owner'),
+  launchToken:       withAuth(launchToken,       'owner'),
+  swapToken:         withAuth(swapToken,         'owner'),
+  buybackToken:      withAuth(buybackToken,      'owner'),
+  sellToken:         withAuth(sellToken,         'owner'),
+};
+
+// packages/core/src/tools/public/index.ts
+export const publicTools = {
+  transferSol:   withAuth(transferSol,   'public'),
+  transferToken: withAuth(transferToken, 'public'),
+};
+```
+
+`tools/index.ts` then composes them:
+
+```typescript
+export const publicAgentTools     = { ...sharedTools, ...publicTools };
+export const autonomousAgentTools = { ...sharedTools };
+export const publicToolNames     = Object.keys(publicAgentTools);
+export const autonomousToolNames = Object.keys(autonomousAgentTools);
+```
+
+### 5.3 Tool Error Codes
+
+The template ships two overlapping error-code sets. Implementations should import from whichever is closer to their call site:
+
+**Classifier codes (`shared/error-codes.ts`)** — used by `toToolError(err)`, which maps unknown caught errors to one of:
+
+| Code | Triggered by |
+|---|---|
+| `INSUFFICIENT_FUNDS` | message contains `insufficient` / `not enough` |
+| `TIMEOUT` | `timeout` / `timed out` |
+| `NOT_FOUND` | `not found` / `does not exist` |
+| `SLIPPAGE_TOO_HIGH` | `slippage` |
+| `PRICE_IMPACT_TOO_HIGH` | `price impact` |
+| `UNAUTHORIZED` | `unauthorized` / `not the owner` |
+| `RPC_FAILURE` | `rpc` / `fetch` / `network` |
+| `GENERIC` | fallthrough (message truncated to 200 chars) |
+| `INVALID_INPUT` | reserved (tools throw it directly for bad args) |
+
+**Tool-result codes (`shared/types/tool-result.ts`)** — the full `ToolErrorCode` union tools may emit via `err(...)`. Extends the classifier set with:
+
+| Code | Emitted when |
+|---|---|
+| `INTEGRITY` | Jupiter signer-slot or `simulateAndVerifySwap` delta check refuses to sign (§10.4) |
+| `NOT_REGISTERED` | A treasury or launch tool is called before `agentAssetAddress` is set |
+| `NO_TOKEN` | Buyback/sell is called without `agentTokenMint` *or* `TOKEN_OVERRIDE` |
+
+Raw errors are always `console.error`'d server-side; only the taxonomy code + a short, LLM-safe message are returned to the model.
+
+### 5.4 Tool Authorization
 
 Tool authorization is enforced **programmatically** at the tool execution layer -- not via the system prompt. This ensures that prompt injection and social engineering cannot bypass access controls.
 
@@ -312,7 +393,9 @@ Three methods supported (the server accepts any of them; the client picks one):
 - **Authorization header:** `Authorization: Bearer <token>` (works for non-browser WS clients that can set custom headers).
 - **Query parameter** (convenience for local dev and CLI tools like `wscat`): `?token=<value>`. Discouraged in production because the token leaks through logs, history, and Referer.
 
-`WEB_CHANNEL_TOKEN` must be at least 32 characters. Unauthorized connections receive close code `4001` with reason `"Unauthorized"`.
+`WEB_CHANNEL_TOKEN` must be at least 32 characters. Unauthorized connections receive close code `4001` with reason `"Unauthorized"`. Exceeding `MAX_CONNECTIONS` closes with `4002` `"Too many connections"`. Server shutdown closes with `1001` `"Server shutting down"`.
+
+**Prompt-injection mitigations.** Every user turn is wrapped by the server as `[Agent: registered | Asset: X | User wallet: Y] <content>`. The status label, wallet address, and content are stripped of `\r\n[]` before interpolation so a crafted wallet or message cannot close the bracket and inject a fake system directive. Content length is further capped by `MAX_MESSAGE_CONTENT` (default 8000 chars).
 
 ### 6.3 Client -> Server Messages
 
@@ -341,17 +424,19 @@ All server -> client messages are unicast to the originating session. There is n
 
 ### 6.5 Debug Events
 
-The server streams granular execution telemetry for frontend developer tools:
+The server streams granular execution telemetry for frontend developer tools. Gated by `ENABLE_DEBUG_EVENTS` (default `true`).
 
 | Event | Data |
 |---|---|
-| `debug:step_start` | Step number, type (initial/tool-result) |
-| `debug:tool_call` | Tool name, arguments, call ID |
-| `debug:tool_result` | Tool name, result, error flag, duration |
+| `debug:step_start` | Step number, `stepType: 'initial' \| 'tool-result' \| 'continue'` |
+| `debug:tool_call` | Tool name, arguments, `toolCallId` |
+| `debug:tool_result` | Tool name, result, `isError` flag, duration |
 | `debug:text_delta` | Streaming text chunks from LLM |
-| `debug:step_complete` | Finish reason, token usage, duration |
-| `debug:generation_complete` | Total steps, aggregated usage, trace ID |
-| `debug:context` | Agent mode, model, tools, wallet, client count |
+| `debug:step_complete` | Finish reason, token usage (input/output, optional reasoning + cached), duration |
+| `debug:generation_complete` | Total steps, aggregated usage, total duration, optional `traceId`, `finishReason` (may be `'budget_exceeded'`, `'aborted'`, `'error'`) |
+| `debug:context` | Agent mode, model, assistant name, wallet, connected client count, conversation length, enabled tool names |
+
+`debug:context` is also emitted synthetically on connect, on wallet change, on session cleanup (to update remaining sessions' client count), and after each generation completes.
 
 ### 6.6 Transaction Signing Flow (Public Mode)
 
@@ -385,6 +470,12 @@ Transaction submission is **awaitable** from the tool's point of view. Tools cal
 
 For multi-transaction flows, tools may pass `index`/`total` on each `submitOrSend` call so the frontend can render "Transaction N of M" progress. Each still has its own `correlationId`.
 
+**Late-ok handling.** If a `tx_result` arrives *after* the pending promise has already timed out, the server:
+- Accepts a well-formed `BASE58_SIGNATURE_RE`-matching signature as a silent success (logs `[late-ok]` but does not send `UNKNOWN_CORRELATION` back, since the tx really did land).
+- Rejects malformed signatures with `UNKNOWN_CORRELATION` (defence against a buggy/forged client).
+
+`tx_error` for an unknown correlation always returns `UNKNOWN_CORRELATION`. In autonomous mode, both `tx_result` and `tx_error` from a client are rejected with `INVALID_MODE`.
+
 **Tools that do NOT flow through this path (agent-signed in both modes):**
 
 - **`launch-token`** -- always agent-signed. The Metaplex Genesis SDK composes multiple instructions into agent-signed transactions; the agent pays the launch cost from its PDA/keypair. See §10.5. Requires `confirmIrreversible: true` on the tool input.
@@ -395,10 +486,28 @@ The `index`/`total` fields remain available for other multi-tx tools that do rou
 ### 6.7 State Management
 
 - **Wallet state:** Per-session (each WebSocket connection has its own). A second client connecting to the same server never sees the first client's wallet address.
-- **Conversation history:** Per-session, in-memory, lost on restart. Two users chatting simultaneously do not share context.
+- **Conversation history:** Per-session, in-memory, capped at `MAX_HISTORY = 50` entries (the oldest turn is dropped when the cap is reached). Lost on restart. Two users chatting simultaneously do not share context.
 - **Connection state:** Independent per WebSocket client.
-- **Pending transactions:** Per-session map keyed by `correlationId`. Cleared on disconnect (all pending promises rejected).
+- **Pending transactions:** Per-session map keyed by `correlationId`. Cleared on disconnect (all pending promises rejected with `"Client disconnected"`).
+- **Pending chat / tx queues:** Per-session arrays drained after the current agent stream finishes, so messages or tx results that arrive mid-processing are not dropped.
+- **Rate limiter:** Per-session sliding window (20 messages per 10 seconds). Exceeding it emits an `error` with code `RATE_LIMIT` but does not close the socket.
+- **`aliveCheck` / ping-pong:** Server pings each open socket every 30 seconds; if a pong is not received within the next 60-second tick the connection is `terminate()`'d. Intervals live on the session and are cleared in cleanup.
 - **Owner cache:** Process-global (keyed by `agentAssetAddress`, not session). See §3.4.
+
+### 6.8 Server Preflight
+
+Before binding the port, `PlexChatServer.start()` runs two checks and calls `process.exit(1)` with a descriptive message on failure:
+
+1. `createUmi()` decodes `AGENT_KEYPAIR` — catches malformed base58 / JSON byte arrays up front.
+2. `umi.rpc.getSlot()` — proves the configured `SOLANA_RPC_URL` is reachable.
+
+Transport-level defence:
+
+- `WebSocketServer.maxPayload = 64 * 1024` — caps inbound frames at 64 KB.
+- `verifyClient` rejects browser origins not in `WS_ALLOWED_ORIGINS` (undefined origins — curl, wscat, native — are accepted but logged).
+- `handleProtocols` echoes the `bearer` subprotocol back when present so handshakes with `['bearer', '<token>']` succeed.
+- Token comparison uses `crypto.timingSafeEqual`.
+- Connection count is hard-capped at `MAX_CONNECTIONS`; the excess client receives close code `4002` (`Too many connections`).
 
 ---
 
@@ -481,16 +590,20 @@ All configuration is via environment variables, validated at startup with Zod sc
 | `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
 | `TOKEN_OVERRIDE` | Target a specific token for buybacks (e.g., MPLX) instead of launching |
 | `JUPITER_API_KEY` | Jupiter API key for price data and swap quotes |
-| `AGENT_FUNDING_SOL` | Override for the SOL amount sent to the agent wallet during `register-agent` funding (default `0.02`) |
-| `AGENT_FUNDING_THRESHOLD_SOL` | Balance threshold below which `register-agent` triggers the funding flow (default `0.01`) |
+| `AGENT_FUNDING_SOL` | Override for the SOL amount sent to the agent wallet during `register-agent` funding (default `0.02`, loaded lazily from `server-limits.ts`) |
+| `AGENT_FUNDING_THRESHOLD_SOL` | Balance threshold below which `register-agent` triggers the funding flow (default `0.01`, loaded lazily from `server-limits.ts`) |
+| `MAX_TOKENS_PER_MESSAGE` | Cumulative token cap per user message across all steps (default `100000`, `server-limits.ts`). Exceeding it aborts the current turn with `BUDGET_EXCEEDED`. |
+| `MAX_TOOL_EXECUTIONS_PER_MESSAGE` | Maximum tool-call count per user message across all steps (default `30`, `server-limits.ts`). Exceeding it aborts the current turn with `BUDGET_EXCEEDED`. |
+| `PORT` | Fallback for `WEB_CHANNEL_PORT` so Railway/Render/Fly/Heroku deployments that inject `PORT` work unmodified. |
 
 ### 8.2 UI Environment (packages/ui/.env.local)
 
 | Variable | Default | Description |
 |---|---|---|
 | `NEXT_PUBLIC_WS_HOST` | `localhost` | WebSocket server host |
-| `NEXT_PUBLIC_WS_PORT` | `3002` | WebSocket server port |
-| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars) |
+| `NEXT_PUBLIC_WS_PORT` | `3002` for local, `443` for remote | WebSocket server port. Omitted from the URL when it matches the default for the protocol (443 for `wss`, 80 for `ws`). |
+| `NEXT_PUBLIC_WS_PROTOCOL` | auto | Force `ws` or `wss`. When unset: `ws` for `localhost` / `127.0.0.1`, `wss` otherwise (avoids mixed-content blocking from HTTPS pages). |
+| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars). Passed via the `bearer` subprotocol, not the URL. |
 | `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC for wallet adapter |
 | `NEXT_PUBLIC_SOLANA_CLUSTER` | `devnet` | Cluster used to build Solana Explorer links for transactions. One of `mainnet-beta`, `devnet`, `testnet`. |
 
@@ -563,7 +676,17 @@ The `TOKEN_OVERRIDE` env var allows hosted agents (e.g., on metaplex.com) to tar
 
 Agent state (`agentAssetAddress`, `agentTokenMint`) is persisted to a simple JSON file rather than a database. This keeps the template dependency-free and file-system-portable. The state file is auto-generated and gitignored.
 
-### 10.8 Per-Session State
+### 10.8 Funding Seam (`shared/funding.ts`)
+
+`ensureAgentFunded(umi, ctx)` is the single mode-aware helper that registration/delegation tools call before any on-chain op that needs SOL in the agent keypair. Behaviour:
+
+- If `balance >= AGENT_FUNDING_THRESHOLD_SOL`: returns `{ funded: true }` immediately.
+- Public mode with a connected user wallet and `transactionSender` in context: builds a `transferSol(user → agent)` of `AGENT_FUNDING_SOL`, routes it through `submitOrSend` (with a fee-zeroed `fundingContext` so no agent fee is prepended on top of the top-up itself), then polls the confirmed balance up to 10 × 1s before returning `{ funded: true }`.
+- Autonomous mode or public mode with no connected wallet: returns `{ funded: false, reason: ... }` with a string the caller turns into an `INSUFFICIENT_FUNDS` tool error that tells the operator the exact address + amount to fund.
+
+Keeping this logic behind one helper means tools like `register-agent` never branch on `AGENT_MODE`.
+
+### 10.9 Per-Session State
 
 Every WebSocket connection gets its own `Session` object — not a share of a server-wide singleton. Each session owns its wallet address, conversation history, processing flag, abort controller, pending transactions map (keyed by `correlationId`), and pending message queue. The agent instance, owner cache, and rate-limiter state remain process-global because they are either stateless between calls or genuinely cross-cutting.
 
@@ -614,6 +737,18 @@ pnpm dev:all      # Server + UI on http://localhost:3001
 | Solana network | `.env` (`SOLANA_RPC_URL`) |
 | WebSocket port | `.env` (`WEB_CHANNEL_PORT`) |
 
+### 11.4 Bootstrap (Template Pruning)
+
+`scripts/bootstrap.ts`, run via `pnpm bootstrap [public|autonomous] [--dry-run] [--yes]`, prunes the template to a single `AGENT_MODE`:
+
+- Deletes packages/tools/files that only apply to the other mode (e.g. `packages/ui/`, `packages/core/src/tools/public/`, or `packages/core/src/agent-autonomous.ts` depending on direction).
+- Rewrites `create-agent.ts`, `tools/index.ts`, `core/src/index.ts`, and `prompts.ts` to the simpler single-mode form.
+- Applies targeted patches to `packages/server/src/websocket.ts` so it hardcodes one tool list and drops the opposite import.
+- Strips the opposite `# PUBLIC MODE ONLY` / `# AUTONOMOUS MODE ONLY` section from `.env.example` and prunes root `package.json` scripts that no longer apply (e.g. `dev:ui`/`dev:all` for autonomous forks).
+- Prints a checklist of manual follow-ups (README edits, `submitOrSend` branch collapse, `BOOTSTRAP_WALLET` validation removal in pure public forks, etc.).
+
+The script is idempotent (re-running is safe) and refuses to proceed if an anchor string it expects to patch has been edited — it fails loudly rather than corrupting the file.
+
 ---
 
 ## 12. Production Considerations
@@ -624,7 +759,7 @@ The WebSocket server runs unencrypted (`ws://`) by default. In production, termi
 
 ### 12.2 Authentication & Authorization
 
-The template includes a layered authorization system (see §5.3) that enforces access control programmatically:
+The template includes a layered authorization system (see §5.4) that enforces access control programmatically:
 
 - **Autonomous mode** is owner-gated at the connection level -- non-owners cannot interact
 - **Public mode** uses per-tool auth levels to restrict treasury operations to the owner
@@ -656,7 +791,7 @@ Conversation history is in-memory and lost on server restart. For production per
 
 ### 12.6 Wallet State Model
 
-Wallet state is per-session — each WebSocket connection has its own `walletAddress`, conversation history, and transaction queue (see §10.8). The public-mode multi-user scenario is supported out of the box; no further work is needed to isolate one user's wallet from another's.
+Wallet state is per-session — each WebSocket connection has its own `walletAddress`, conversation history, and transaction queue (see §10.9). The public-mode multi-user scenario is supported out of the box; no further work is needed to isolate one user's wallet from another's.
 
 What remains out of scope for the template: cross-connection identity (a single user reconnecting on a new WS does not automatically recover their prior conversation), and durable conversation persistence (see §12.5).
 
@@ -668,20 +803,24 @@ What remains out of scope for the template: cross-connection identity (a single 
 |---|---|---|
 | Runtime | Node.js | >= 20 |
 | Package Manager | pnpm | >= 9 |
-| Language | TypeScript | 5.8+ (ES2022 target, strict mode) |
-| AI Framework | Mastra | 1.24+ |
+| Language | TypeScript | 5.8+ in packages, 6.x root devDep (ES2022 target, strict mode, `module: ESNext`, `moduleResolution: bundler`) |
+| AI Framework | Mastra (`@mastra/core`) | 1.24+ |
 | Solana Client | Metaplex Umi | 1.1+ |
 | Solana Tools | mpl-toolbox | 0.10+ |
 | Agent Registry | mpl-agent-registry | 0.2.5+ |
 | Token Launch | Metaplex Genesis | 0.35+ |
 | Core Assets | mpl-core | 1.9+ |
-| DEX | Jupiter API | v1 (quote) / v3 (price) |
-| WebSocket | ws | 8.18+ |
+| DEX | Jupiter API | swap/v1 (quote + swap) / price/v3 |
+| WebSocket | `ws` | 8.18+ |
 | Frontend | Next.js | 15.3+ |
 | UI Framework | React | 19+ |
 | Styling | Tailwind CSS | 4.0+ |
-| Wallet | Solana Wallet Adapter | latest |
+| Wallet | Solana Wallet Adapter (`@solana/wallet-adapter-*`) | latest (0.15/0.19) |
 | Validation | Zod | 3.23+ |
+| Secret-key decoding | `bs58` | 6+ |
+| Env loading | `dotenv` | 16+ |
+| Containers | Node 20 slim Dockerfile (multi-stage) | — |
+| PaaS config | `railway.json` (Dockerfile builder) | — |
 
 ---
 
@@ -695,7 +834,12 @@ type ClientMessage =
   | { type: 'wallet_connect';    address: string }
   | { type: 'wallet_disconnect' }
   | { type: 'tx_result';         correlationId: string; signature: string }
-  | { type: 'tx_error';          correlationId: string; reason?: string };
+  | { type: 'tx_error';          correlationId: string; reason: string };
+
+// The `reason` field on `tx_error` is required in the TypeScript definition,
+// but the server tolerates a missing/malformed value — it substitutes the
+// literal string "User rejected or wallet error" and sanitizes any user-
+// supplied reason against SAFE_REASON_RE (`[\w\s.,:;'"()?!\-]{0,200}`).
 ```
 
 ### Server -> Client
@@ -756,54 +900,96 @@ interface TransactionSender {
 
 ```
 metaplex-agent-template/
-  .env.example                    Environment variable reference
-  agent-state.json                Auto-generated agent identity (gitignored)
-  package.json                    Root workspace scripts
-  pnpm-workspace.yaml             Workspace definition
-  tsconfig.json                   Shared TypeScript config
+  .env.example                    Environment variable reference (grouped by mode)
+  .dockerignore                   Docker build-context exclusions
+  .npmrc                          shamefully-hoist=true (Umi compatibility)
+  agent-state.json                Auto-generated agent identity (0600, gitignored)
+  Dockerfile                      Multi-stage server image (Node 20 slim, non-root)
+  package.json                    Root workspace scripts (dev, build, clean, typecheck, bootstrap)
+  pnpm-workspace.yaml             `packages/*`
+  railway.json                    Railway deploy manifest (Dockerfile builder)
+  tsconfig.json                   Shared TypeScript config (ES2022 / ESNext / strict)
   WEBSOCKET_PROTOCOL.md           Full PlexChat protocol specification
+  docs/
+    SPEC.md                       This document
+    DEPLOYMENT.md                 Per-mode deployment recipes (nginx, Docker, Railway)
+  scripts/
+    bootstrap.ts                  Fork-time template pruner (see §11.4)
 
   packages/
     shared/src/
-      config.ts                   Zod-validated env config loader
-      umi.ts                      Umi factory (mode-aware signer setup)
-      transaction.ts              submitOrSend() -- mode-aware tx routing + fee prepend
-      execute.ts                  Tool execution wrapper with RequestContext
-      auth.ts                     Owner resolution, auth policy, withAuth wrapper
-      context.ts                  readAgentContext() -- shared AgentContext extractor
-      error-codes.ts              Shared protocol / tool error-code constants
-      server-limits.ts            Server-side limit helpers (content size, RPC budget, ...)
-      jupiter.ts                  Jupiter API helpers (quote, swap, price, simulateAndVerifySwap)
-      state.ts                    agent-state.json read/write
-      types/protocol.ts           PlexChat message type definitions
-      types/agent.ts              AgentContext and TransactionSender interfaces
-      types/tool-result.ts        ToolResult<T> + ok()/info()/err() helpers
+      config.ts                   Zod-validated env config loader + AGENT_KEYPAIR decoder
+      umi.ts                      createUmi() — Umi factory with keypair identity
+      transaction.ts              submitOrSend() — mode-aware tx routing + fee prepend
+      funding.ts                  ensureAgentFunded() — mode-aware top-up seam
+      execute.ts                  executeAsAgent() + getAgentPda() — MPL Core Execute CPI
+      auth.ts                     resolveOwner, ownerCache, defaultAuthPolicy, withAuth
+      context.ts                  readAgentContext() — shared AgentContext extractor
+      error-codes.ts              toToolError() classifier + ToolErrorCodes
+      server-limits.ts            getServerLimits() — funding + per-message token/tool caps
+      jupiter.ts                  Quote, swap, price helpers + simulateAndVerifySwap
+      state.ts                    agent-state.json atomic read/write
+      types/protocol.ts           PlexChat Client/Server/Debug message unions
+      types/agent.ts              AgentContext + TransactionSender
+      types/tool-result.ts        ToolResult<T> + ok() / info() / err()
       index.ts                    Barrel exports
 
     core/src/
-      create-agent.ts             Factory: returns public or autonomous agent
-      agent-public.ts             Public mode Mastra Agent definition
-      agent-autonomous.ts         Autonomous mode Mastra Agent definition
-      prompts.ts                  System prompt (base + mode addendums)
-      index.ts                    Package exports
+      create-agent.ts             Mode-dispatch factory
+      agent-public.ts             Public-mode Mastra Agent definition
+      agent-autonomous.ts         Autonomous-mode Mastra Agent definition
+      prompts.ts                  BASE_PROMPT + PUBLIC_ADDENDUM / AUTONOMOUS_ADDENDUM
+      index.ts                    Package exports (createAgent, tool-name lists)
       tools/
-        index.ts                  Tool registry (mode-based assignment)
-        shared/                   12 tools for both modes
-        public/                   2 tools for public mode only
+        index.ts                  publicAgentTools / autonomousAgentTools composition
+        shared/                   12 tools wired via withAuth
+          get-balance.ts
+          get-token-balances.ts
+          get-transaction.ts
+          get-token-price.ts
+          get-token-metadata.ts
+          sleep.ts
+          register-agent.ts
+          delegate-execution.ts
+          launch-token.ts
+          swap-token.ts
+          buyback-token.ts
+          sell-token.ts
+          index.ts
+        public/                   2 tools only for public mode
+          transfer-sol.ts
+          transfer-token.ts
+          index.ts
 
     server/src/
-      index.ts                    Entry point (instantiates PlexChatServer)
-      websocket.ts                PlexChatServer class (auth, routing, streaming)
+      index.ts                    Entry point; SIGINT/SIGTERM → graceful shutdown
+      websocket.ts                PlexChatServer (auth, routing, streaming, budgets)
       session.ts                  Per-connection Session (state, send, cleanup)
 
-    ui/src/
-      app/page.tsx                Main page (chat + wallet + tx approval)
-      app/providers.tsx           Solana wallet adapter context
-      app/env.ts                  Client-side WebSocket URL builder
-      hooks/use-plexchat.ts       WebSocket hook (connect, messages, reconnect)
-      hooks/use-debug-panel.ts    Debug telemetry tracking
-      components/chat-panel.tsx   Message list + input
-      components/chat-message.tsx Message bubble with markdown
-      components/typing-indicator.tsx  Animated typing dots
-      components/debug/           Debug panel (4 tabs: Steps, Context, Messages, Totals)
+    ui/
+      package.json                Next 15, React 19, Tailwind 4, Solana Wallet Adapter
+      next.config.ts / postcss.config.mjs / tsconfig.json
+      src/
+        app/
+          layout.tsx              Root layout + providers import
+          page.tsx                Chat + wallet connect + tx approval overlay
+          providers.tsx           Solana wallet adapter providers (Phantom/Solflare)
+          env.ts                  wsUrl() / wsToken() / solanaCluster()
+          globals.css             Tailwind entry
+          icon.png                Browser favicon
+        hooks/
+          use-plexchat.ts         WebSocket connect / reconnect / stream handling
+          use-debug-panel.ts      Debug tab state + totals aggregation
+        components/
+          chat-panel.tsx          Scrollable message list + composer
+          chat-message.tsx        Bubble with markdown renderer
+          typing-indicator.tsx    Animated dots
+          transaction-approval.tsx Modal: pending → signing → sending → confirming → done/err
+          debug/
+            debug-panel.tsx       Tabbed host (Cmd+D toggle)
+            steps-tab.tsx
+            context-tab.tsx
+            messages-tab.tsx
+            totals-tab.tsx
+            json-tree.tsx         Collapsible tree viewer used by tabs
 ```

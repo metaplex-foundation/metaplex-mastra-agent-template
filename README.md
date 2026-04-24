@@ -233,6 +233,9 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 | `JUPITER_API_KEY` | Jupiter API key for price data and swap quotes |
 | `AGENT_FUNDING_SOL` | Override SOL amount sent to the agent wallet during `register-agent` funding (default `0.02`) |
 | `AGENT_FUNDING_THRESHOLD_SOL` | Balance threshold that triggers the funding flow (default `0.01`) |
+| `MAX_TOKENS_PER_MESSAGE` | Cumulative LLM token cap per user message across all steps (default `100000`). Exceeding it aborts the turn with `BUDGET_EXCEEDED`. |
+| `MAX_TOOL_EXECUTIONS_PER_MESSAGE` | Maximum tool calls per user message across all steps (default `30`). Exceeding it aborts the turn with `BUDGET_EXCEEDED`. |
+| `PORT` | Fallback for `WEB_CHANNEL_PORT` when the platform (Railway/Render/Fly/Heroku) injects `PORT` instead. |
 
 **LLM_MODEL format:** `<provider>/<model-id>`, using Mastra's model router. Examples:
 
@@ -247,8 +250,9 @@ Set the corresponding API key environment variable for whichever provider you ch
 | Variable | Default | Description |
 |---|---|---|
 | `NEXT_PUBLIC_WS_HOST` | `localhost` | WebSocket server host |
-| `NEXT_PUBLIC_WS_PORT` | `3002` | WebSocket server port |
-| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars) |
+| `NEXT_PUBLIC_WS_PORT` | `3002` (local), `443` (remote) | WebSocket server port. Omitted from the URL when it matches the default port for the selected protocol. |
+| `NEXT_PUBLIC_WS_PROTOCOL` | auto | Force `ws` or `wss`. When unset: `ws` for localhost/127.0.0.1, `wss` otherwise (avoids mixed-content blocking from HTTPS pages). |
+| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars). Passed via the `bearer` subprotocol, not the URL. |
 | `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC for wallet adapter |
 | `NEXT_PUBLIC_SOLANA_CLUSTER` | `devnet` | Cluster used for Solana Explorer links. One of `mainnet-beta`, `devnet`, `testnet`. |
 
@@ -258,16 +262,21 @@ Set the corresponding API key environment variable for whichever provider you ch
 
 ```
 metaplex-agent-template/
-  .env.example                  # Environment variable reference
-  agent-state.json              # Auto-generated agent identity (gitignored)
-  package.json                  # Root workspace scripts (dev, build, typecheck)
-  pnpm-workspace.yaml           # pnpm workspace definition
+  .env.example                  # Environment variable reference (grouped by mode)
+  .dockerignore                 # Docker build-context exclusions
+  .npmrc                        # shamefully-hoist=true (Umi compatibility)
+  agent-state.json              # Auto-generated agent identity (0600, gitignored)
+  Dockerfile                    # Multi-stage server image (Node 20 slim, non-root)
+  package.json                  # Root workspace scripts (dev, build, typecheck, bootstrap)
+  pnpm-workspace.yaml           # pnpm workspace definition (packages/*)
+  railway.json                  # Railway deploy manifest (Dockerfile builder)
   tsconfig.json                 # Shared TypeScript config (ES2022, strict)
   WEBSOCKET_PROTOCOL.md         # Full PlexChat protocol specification
   docs/
     SPEC.md                     # Product requirements / canonical spec
-    REVIEW_REPORT.md            # Audit findings
-    REVIEW_DESIGN.md            # Remediation design doc
+    DEPLOYMENT.md               # Per-mode deployment recipes (nginx, Docker, Railway)
+  scripts/
+    bootstrap.ts                # Template pruner -- pnpm bootstrap [public|autonomous]
 
   packages/
     core/                       # @metaplex-agent/core
@@ -304,16 +313,17 @@ metaplex-agent-template/
 
     shared/                     # @metaplex-agent/shared
       src/
-        config.ts               # Zod-validated env config loader (getConfig)
-        umi.ts                  # Umi factory (createUmi) -- mode-aware signer setup
+        config.ts               # Zod-validated env config loader + AGENT_KEYPAIR decoder
+        umi.ts                  # createUmi() -- Umi factory with keypair identity
         transaction.ts          # submitOrSend() -- mode-aware tx routing + fee prepend
-        execute.ts              # Tool execution wrapper with RequestContext
+        funding.ts              # ensureAgentFunded() -- mode-aware top-up seam
+        execute.ts              # executeAsAgent() + getAgentPda() (MPL Core Execute CPI)
         auth.ts                 # Owner resolution, auth policy, withAuth wrapper
         context.ts              # readAgentContext() -- shared AgentContext extractor
-        error-codes.ts          # Shared protocol/tool error code constants
-        server-limits.ts        # Server-side limit helpers (content size, RPC budget, ...)
-        jupiter.ts              # Jupiter API helpers + simulateAndVerifySwap
-        state.ts                # agent-state.json read/write
+        error-codes.ts          # toToolError() classifier + ToolErrorCodes
+        server-limits.ts        # getServerLimits() -- funding + per-message budgets
+        jupiter.ts              # Quote/swap/price helpers + simulateAndVerifySwap
+        state.ts                # agent-state.json atomic read/write
         index.ts                # Barrel exports
         types/
           protocol.ts           # PlexChat WebSocket message type definitions
@@ -561,7 +571,13 @@ This compiles TypeScript to JavaScript in each package's `dist/` folder, then st
 
 ## Deployment Notes
 
-For end-to-end recipes per mode (nginx examples, Dockerfiles, Kubernetes manifests) see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md). A step-by-step **Railway** deploy (using the `Dockerfile` and `railway.json` at the repo root) lives in that file too — it's the fastest path from `git push` to a running public-mode agent.
+The repo ships three deploy artifacts out of the box:
+
+- **`Dockerfile`** — multi-stage Node 20 slim image. Installs with pnpm, builds `shared → core → server`, and runs as non-root user `agent` on port 3002. UI is excluded from the server image via `.dockerignore` (the UI is designed to deploy separately, e.g. on Vercel).
+- **`railway.json`** — Railway config pointing at the Dockerfile. Railway injects `PORT`; `config.ts` falls back to it when `WEB_CHANNEL_PORT` is not set, so no extra wiring is needed.
+- **`.dockerignore`** — keeps `.env`, `agent-state.json`, `node_modules`, local builds, docs, and the UI source out of the build context.
+
+For end-to-end recipes per mode (nginx examples, hardening checklists, Docker tuning, Kubernetes manifests) see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md). A step-by-step **Railway** deploy lives in that file too — it's the fastest path from `git push` to a running public-mode agent.
 
 ### Use WSS in production
 
