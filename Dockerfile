@@ -22,19 +22,16 @@ WORKDIR /app
 RUN corepack enable
 
 # Copy workspace manifests first so `pnpm install` is cacheable independently
-# of source changes. We include every package manifest the lockfile knows about
-# (including the UI) so `--frozen-lockfile` stays happy -- but we only copy UI
-# *sources* if you want to build it. The default build below skips the UI.
+# of source changes.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/core/package.json ./packages/core/
 COPY packages/server/package.json ./packages/server/
-COPY packages/ui/package.json ./packages/ui/
 
 RUN pnpm install --frozen-lockfile
 
-# Copy sources for the server chain only. The UI is deployed separately
-# (e.g. to Vercel) and isn't needed in the server image.
+# Copy sources for the server chain. The chat UI lives in a separate repo
+# (metaplex-agent-chat-template) and is deployed separately (e.g. Vercel).
 COPY tsconfig.json ./
 COPY packages/shared ./packages/shared
 COPY packages/core ./packages/core

@@ -46,8 +46,9 @@ metaplex-agent-template/
     shared/    @metaplex-agent/shared    Foundation layer (config, Umi, types, helpers)
     core/      @metaplex-agent/core      Agent definition, system prompt, tool registry
     server/    @metaplex-agent/server    WebSocket server (PlexChat protocol)
-    ui/        @metaplex-agent/ui        Next.js test frontend
 ```
+
+The chat UI is maintained in a separate repo, [`metaplex-agent-chat-template`](../../metaplex-agent-chat-template), so a single frontend can be paired with multiple agent templates and hosted agents. Any PlexChat-compatible client works.
 
 Additional root-level artifacts that are part of the template contract:
 
@@ -56,7 +57,7 @@ Additional root-level artifacts that are part of the template contract:
 | `.env` / `.env.example` | Workspace-root env. Loaded by `shared/config.ts` via a walk-up search from `cwd`. |
 | `agent-state.json` | Auto-persisted agent identity (asset address, token mint). Written atomically with mode `0600`, gitignored. Anchored to the pnpm workspace root. |
 | `Dockerfile` | Multi-stage image (builder + runtime) for the server. Installs with pnpm, builds `shared → core → server`, runs as non-root `agent` user on port 3002. |
-| `.dockerignore` | Excludes `node_modules`, `dist`, `.env`, `agent-state.json`, docs, and the UI package sources (UI deploys separately). |
+| `.dockerignore` | Excludes `node_modules`, `dist`, `.env`, `agent-state.json`, and docs from the build context. |
 | `railway.json` | Railway build/deploy config pointing at the `Dockerfile`. |
 | `scripts/bootstrap.ts` | Fork-time template pruner (`pnpm bootstrap [public\|autonomous]`). See §11.4. |
 | `docs/SPEC.md` | This document. |
@@ -596,16 +597,9 @@ All configuration is via environment variables, validated at startup with Zod sc
 | `MAX_TOOL_EXECUTIONS_PER_MESSAGE` | Maximum tool-call count per user message across all steps (default `30`, `server-limits.ts`). Exceeding it aborts the current turn with `BUDGET_EXCEEDED`. |
 | `PORT` | Fallback for `WEB_CHANNEL_PORT` so Railway/Render/Fly/Heroku deployments that inject `PORT` work unmodified. |
 
-### 8.2 UI Environment (packages/ui/.env.local)
+### 8.2 UI Environment
 
-| Variable | Default | Description |
-|---|---|---|
-| `NEXT_PUBLIC_WS_HOST` | `localhost` | WebSocket server host |
-| `NEXT_PUBLIC_WS_PORT` | `3002` for local, `443` for remote | WebSocket server port. Omitted from the URL when it matches the default for the protocol (443 for `wss`, 80 for `ws`). |
-| `NEXT_PUBLIC_WS_PROTOCOL` | auto | Force `ws` or `wss`. When unset: `ws` for `localhost` / `127.0.0.1`, `wss` otherwise (avoids mixed-content blocking from HTTPS pages). |
-| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars). Passed via the `bearer` subprotocol, not the URL. |
-| `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC for wallet adapter |
-| `NEXT_PUBLIC_SOLANA_CLUSTER` | `devnet` | Cluster used to build Solana Explorer links for transactions. One of `mainnet-beta`, `devnet`, `testnet`. |
+The chat UI lives in a sibling repo, [`metaplex-agent-chat-template`](../../metaplex-agent-chat-template), with its own `.env.local`. See that repo's README for the full `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` variable list. The only cross-repo contract: `NEXT_PUBLIC_WS_TOKEN` in the UI must match `WEB_CHANNEL_TOKEN` here.
 
 ---
 
@@ -741,10 +735,10 @@ pnpm dev:all      # Server + UI on http://localhost:3001
 
 `scripts/bootstrap.ts`, run via `pnpm bootstrap [public|autonomous] [--dry-run] [--yes]`, prunes the template to a single `AGENT_MODE`:
 
-- Deletes packages/tools/files that only apply to the other mode (e.g. `packages/ui/`, `packages/core/src/tools/public/`, or `packages/core/src/agent-autonomous.ts` depending on direction).
+- Deletes packages/tools/files that only apply to the other mode (e.g. `packages/core/src/tools/public/`, or `packages/core/src/agent-autonomous.ts` depending on direction).
 - Rewrites `create-agent.ts`, `tools/index.ts`, `core/src/index.ts`, and `prompts.ts` to the simpler single-mode form.
 - Applies targeted patches to `packages/server/src/websocket.ts` so it hardcodes one tool list and drops the opposite import.
-- Strips the opposite `# PUBLIC MODE ONLY` / `# AUTONOMOUS MODE ONLY` section from `.env.example` and prunes root `package.json` scripts that no longer apply (e.g. `dev:ui`/`dev:all` for autonomous forks).
+- Strips the opposite `# PUBLIC MODE ONLY` / `# AUTONOMOUS MODE ONLY` section from `.env.example`.
 - Prints a checklist of manual follow-ups (README edits, `submitOrSend` branch collapse, `BOOTSTRAP_WALLET` validation removal in pure public forks, etc.).
 
 The script is idempotent (re-running is safe) and refuses to proceed if an anchor string it expects to patch has been edited — it fails loudly rather than corrupting the file.
