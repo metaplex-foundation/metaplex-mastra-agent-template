@@ -263,7 +263,6 @@ FROM node:20-slim AS builder
 WORKDIR /app
 RUN corepack enable
 COPY pnpm-*.yaml package.json ./
-# Prune packages/ui before install in autonomous mode (optional but recommended)
 COPY packages/shared ./packages/shared
 COPY packages/core ./packages/core
 COPY packages/server ./packages/server
@@ -375,12 +374,13 @@ Then update `WS_ALLOWED_ORIGINS` on the Railway service to include the UI's publ
 
 #### Vercel setup (UI)
 
-Import the repo in Vercel and set:
+The chat UI is a separate repo: [`metaplex-agent-chat-template`](https://github.com/metaplex-foundation/metaplex-agent-chat-template) (or wherever you've forked it). Import that repo in Vercel and set:
 
 - **Framework preset**: Next.js (auto-detected)
-- **Root Directory**: `packages/ui`
-- **Install Command**: leave default (`pnpm install` at repo root — Vercel picks this up from `pnpm-workspace.yaml`)
-- **Build Command**: leave default (`pnpm run build`). The UI's `build` script already compiles `@metaplex-agent/shared` first — Vercel doesn't know about workspace deps, so without that chain the build fails with `Cannot find module '@metaplex-agent/shared'`.
+- **Root Directory**: leave at repo root
+- **Install / Build Command**: defaults are fine — the UI is a standalone Next.js app with no workspace dependencies.
+
+Set `NEXT_PUBLIC_WS_HOST` to your agent's public hostname, `NEXT_PUBLIC_WS_TOKEN` to a value matching `WEB_CHANNEL_TOKEN` on the agent service, and add the UI's deployed origin to `WS_ALLOWED_ORIGINS` on the agent.
 
 You can safely ignore the `pino-pretty` warning from `@walletconnect/logger` — it's an optional peer dep only used for dev-mode log formatting.
 

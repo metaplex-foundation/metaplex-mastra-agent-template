@@ -335,7 +335,6 @@ function makeAutonomousPlan(): Plan {
   return {
     mode: 'autonomous',
     deletePaths: [
-      'packages/ui',
       'packages/core/src/tools/public',
       'packages/core/src/agent-public.ts',
     ],

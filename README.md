@@ -17,7 +17,7 @@ This template supports two operating modes. Pick one before you go further — a
 | **You want this if** | Users interact via chat and approve each tx in Phantom / Solflare | The agent runs on its own schedule and nobody is in the loop |
 | **Example products** | Wallet cleanup bot, mint helper, token launch assistant, portfolio advisor | Treasury rebalancer, strategy bot, automated buybacks, scheduled payouts |
 | **`.env` setting** | `AGENT_MODE=public` | `AGENT_MODE=autonomous` + `BOOTSTRAP_WALLET=<pubkey>` |
-| **UI package useful?** | Yes — drop-in chat interface | Usually no — consider deleting `packages/ui/` |
+| **Chat UI useful?** | Yes — pair with [metaplex-agent-chat-template](../metaplex-agent-chat-template) | Usually no — autonomous agents don't need a chat frontend |
 | **Deployment shape** | Long-lived WS server behind nginx/TLS, public ingress | Background worker, no public ingress, keypair in a secrets manager |
 
 **Unsure? Pick `public` — it's the default and the built-in UI lets you see everything working in minutes.** You can switch later by editing one env var.
@@ -33,8 +33,8 @@ See [Agent Modes](#agent-modes) below for the full architectural detail, and [`d
 ```
 +-----------------------------------------------------+
 |                     Frontend                         |
-|    (metaplex.com, @metaplex-agent/ui, or any WS      |
-|     client with wallet support)                      |
+|    (metaplex.com, metaplex-agent-chat-template, or  |
+|     any WS client with wallet support)              |
 +---------------------------+--------------------------+
                             |
                       PlexChat Protocol
@@ -119,20 +119,20 @@ pnpm dev
 
 The WebSocket server starts on `ws://localhost:3002` (or the port you configured).
 
-### 4. Test with the built-in UI
+### 4. Test with the chat UI
 
-The repo includes a lightweight Next.js chat UI for testing without the full metaplex.com frontend:
+The chat UI lives in a sibling repo: [metaplex-agent-chat-template](../metaplex-agent-chat-template). It's a standalone Next.js app that speaks the PlexChat WebSocket protocol, so any agent built from this template (or any other PlexChat-compatible backend) can plug into it.
 
 ```bash
-# Set up the UI env (token must match WEB_CHANNEL_TOKEN in .env)
-cp packages/ui/.env.local.example packages/ui/.env.local
-# Edit packages/ui/.env.local with your token
+cd ../metaplex-agent-chat-template
+cp .env.local.example .env.local
+# Edit .env.local — NEXT_PUBLIC_WS_TOKEN must match WEB_CHANNEL_TOKEN in the agent's .env
 
-# Run both server and UI together
-pnpm dev:all
+pnpm install
+pnpm dev
 ```
 
-Open http://localhost:3001 to chat with the agent, connect a Solana wallet (Phantom/Solflare), and test transaction signing.
+Open http://localhost:3001 to chat with the agent, connect a Solana wallet (Phantom/Solflare), and test transaction signing. Run the agent with `pnpm dev` from this repo in a separate terminal.
 
 You can also connect with any WebSocket client:
 
@@ -245,16 +245,9 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 
 Set the corresponding API key environment variable for whichever provider you choose.
 
-### UI Environment (packages/ui/.env.local)
+### UI Environment
 
-| Variable | Default | Description |
-|---|---|---|
-| `NEXT_PUBLIC_WS_HOST` | `localhost` | WebSocket server host |
-| `NEXT_PUBLIC_WS_PORT` | `3002` (local), `443` (remote) | WebSocket server port. Omitted from the URL when it matches the default port for the selected protocol. |
-| `NEXT_PUBLIC_WS_PROTOCOL` | auto | Force `ws` or `wss`. When unset: `ws` for localhost/127.0.0.1, `wss` otherwise (avoids mixed-content blocking from HTTPS pages). |
-| `NEXT_PUBLIC_WS_TOKEN` | -- | Must match `WEB_CHANNEL_TOKEN` (≥ 32 chars). Passed via the `bearer` subprotocol, not the URL. |
-| `NEXT_PUBLIC_SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana RPC for wallet adapter |
-| `NEXT_PUBLIC_SOLANA_CLUSTER` | `devnet` | Cluster used for Solana Explorer links. One of `mainnet-beta`, `devnet`, `testnet`. |
+The chat UI lives in [metaplex-agent-chat-template](../metaplex-agent-chat-template). See its `.env.local.example` and README for `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` configuration. The only contract this repo cares about: `NEXT_PUBLIC_WS_TOKEN` in the UI must match `WEB_CHANNEL_TOKEN` here.
 
 ---
 
@@ -330,22 +323,9 @@ metaplex-agent-template/
           agent.ts              # AgentContext and TransactionSender interfaces
           tool-result.ts        # ToolResult<T> + ok()/info()/err() helpers
 
-    ui/                         # @metaplex-agent/ui
-      src/
-        app/
-          page.tsx              # Main page -- chat + wallet + transaction approval
-          providers.tsx         # Solana wallet adapter context providers
-          env.ts                # Client-side WebSocket URL builder
-        hooks/
-          use-plexchat.ts       # WebSocket hook (connect, messages, typing, reconnect)
-          use-debug-panel.ts    # Debug telemetry tracking
-        components/
-          chat-panel.tsx        # Scrollable message list + input
-          chat-message.tsx      # Single message bubble
-          typing-indicator.tsx  # Animated typing dots
-          transaction-approval.tsx  # Sign + send transaction overlay
-          debug/                    # Debug panel (Steps, Context, Messages, Totals)
 ```
+
+The chat UI is a separate repo: [metaplex-agent-chat-template](../metaplex-agent-chat-template).
 
 ---
 
