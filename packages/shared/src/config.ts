@@ -171,6 +171,21 @@ const envSchema = z.object({
     (v) => v === undefined ? true : v === 'true' || v === '1',
     z.boolean().default(true),
   ),
+  // --- Autonomous-mode worker loop ---
+  /** Sleep between ticks, in ms. Tick body runs to completion before sleeping. (autonomous mode only) */
+  TICK_INTERVAL_MS: z.coerce.number().int().min(1000).default(300000),
+  /**
+   * When true, transaction-submitting tools log "would have sent X" and
+   * return a synthetic signature instead of submitting. Default-on so a
+   * fresh fork can never accidentally spend on first boot. Flip to false
+   * for production. (autonomous mode only)
+   */
+  AUTONOMOUS_DRY_RUN: z.preprocess(
+    (v) => v === undefined ? true : v === 'true' || v === '1',
+    z.boolean().default(true),
+  ),
+  /** Per-tick transaction submission cap. Resets every tick. (autonomous mode only) */
+  MAX_TICK_TX_COUNT: z.coerce.number().int().min(0).default(3),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

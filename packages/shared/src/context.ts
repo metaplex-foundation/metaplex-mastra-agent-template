@@ -36,5 +36,6 @@ export function readAgentContext(ctx: any): AgentContext {
     agentFeeSol: get<number>('agentFeeSol', 0.001),
     tokenOverride: get<string | null>('tokenOverride', null),
     ownerWallet: get<string | null>('ownerWallet', null),
+    txCounter: get<AgentContext['txCounter']>('txCounter', null),
   };
 }

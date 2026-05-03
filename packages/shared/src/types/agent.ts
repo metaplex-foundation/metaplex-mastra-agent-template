@@ -25,6 +25,20 @@ export interface TransactionSender {
 }
 
 /**
+ * Per-tick transaction-submission counter. Held by the worker loop and
+ * passed through `RequestContext` to `submitOrSend` so tools can't exceed
+ * `MAX_TICK_TX_COUNT` submissions in a single autonomous tick. The counter
+ * is mutated by reference — same object lives in `RequestContext` and in
+ * any `AgentContext` that reads it.
+ *
+ * `null` everywhere outside the worker loop (chat path has no per-turn cap).
+ */
+export interface TxCounter {
+  count: number;
+  max: number;
+}
+
+/**
  * Context passed to tools during execution.
  * Provides access to the wallet address and transaction sender.
  */
@@ -37,4 +51,6 @@ export interface AgentContext {
   agentFeeSol: number;
   tokenOverride: string | null;
   ownerWallet: string | null;
+  /** Per-tick tx submission cap (autonomous worker loop only). null in chat path. */
+  txCounter: TxCounter | null;
 }
