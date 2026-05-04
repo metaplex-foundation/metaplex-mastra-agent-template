@@ -1,11 +1,14 @@
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { createServer, type IncomingMessage, type Server as HttpServer } from 'http';
 import { timingSafeEqual, randomUUID } from 'crypto';
+import { publicKey } from '@metaplex-foundation/umi';
 import {
   getConfig,
   getServerLimits,
   resolveOwner,
   createUmi,
+  getAgentKeypairPublicKey,
+  getAgentPda,
   type ServerMessage,
   type TransactionSender,
   type AgentContext,
@@ -461,10 +464,14 @@ export class PlexChatServer {
     }
 
     // --- Autonomous mode connection gate ---
-    // Only the asset owner can interact; all other messages are rejected
-    // before the LLM is ever invoked. Verification is per-session.
+    // Only the asset owner can invoke the LLM; non-owner messages are rejected
+    // before the agent is ever called. Wallet handshake messages
+    // (wallet_connect / wallet_disconnect) are control-plane and pass through —
+    // gating disconnect would also fire the rejection on page refresh, when the
+    // UI sends a transient disconnect before the wallet adapter has restored.
     const config = getConfig();
-    if (config.AGENT_MODE === 'autonomous' && msg.type !== 'wallet_connect') {
+    const isAuthHandshake = msg.type === 'wallet_connect' || msg.type === 'wallet_disconnect';
+    if (config.AGENT_MODE === 'autonomous' && !isAuthHandshake) {
       if (!session.isOwnerVerified) {
         this.logAuthFailure('autonomous_not_verified', {
           sessionId: session.id,
@@ -695,9 +702,13 @@ export class PlexChatServer {
       // a crafted base58 wallet could close the bracket and inject a fake
       // system directive into every subsequent turn.
       const sanitizedContent = content.replace(/[\r\n\[\]]/g, ' ');
+      const keypairAddr = getAgentKeypairPublicKey();
+      const pdaAddr = config.AGENT_ASSET_ADDRESS
+        ? getAgentPda(createUmi(), publicKey(config.AGENT_ASSET_ADDRESS)).toString()
+        : null;
       const rawStatus = config.AGENT_ASSET_ADDRESS
-        ? `Agent: registered | Asset: ${config.AGENT_ASSET_ADDRESS}`
-        : 'Agent: not registered';
+        ? `Agent: registered | Asset: ${config.AGENT_ASSET_ADDRESS} | Keypair: ${keypairAddr} | PDA: ${pdaAddr}`
+        : `Agent: not registered | Keypair: ${keypairAddr}`;
       const agentStatus = sanitizeForPrefix(rawStatus);
       const walletStatus = session.walletAddress
         ? ` | User wallet: ${sanitizeForPrefix(session.walletAddress)}`

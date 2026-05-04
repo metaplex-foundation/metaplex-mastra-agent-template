@@ -6,20 +6,23 @@ import {
   closeTaskTool,
 } from './goals-tasks.js';
 import { setPausedTool } from './set-paused.js';
+import { withdrawSol } from './withdraw-sol.js';
 
 /**
- * Autonomous-mode-only tools for managing the agent's working memory:
- * goals (durable, owner-set), tasks (tactical, agent-set), and the
- * pause flag (emergency stop). All gated to 'owner' — both the chat
- * path (verified asset owner) and the worker loop (which constructs
- * an owner-equivalent context) can call them.
+ * Autonomous-mode-only tools:
+ * - Working memory: goals (durable, owner-set), tasks (tactical, agent-set),
+ *   pause flag (emergency stop). All gated to 'owner' — both the chat path
+ *   (verified asset owner) and the worker loop can call them.
+ * - Treasury: withdraw-sol moves SOL out of the agent's keypair or PDA.
+ *   Owner-only — no public chat user should be able to drain the agent.
  */
 export const autonomousOnlyTools = {
-  setGoal:    withAuth(setGoal,        'owner'),
-  closeGoal:  withAuth(closeGoalTool,  'owner'),
-  addTask:    withAuth(addTaskTool,    'owner'),
-  closeTask:  withAuth(closeTaskTool,  'owner'),
-  setPaused:  withAuth(setPausedTool,  'owner'),
+  setGoal:     withAuth(setGoal,        'owner'),
+  closeGoal:   withAuth(closeGoalTool,  'owner'),
+  addTask:     withAuth(addTaskTool,    'owner'),
+  closeTask:   withAuth(closeTaskTool,  'owner'),
+  setPaused:   withAuth(setPausedTool,  'owner'),
+  withdrawSol: withAuth(withdrawSol,    'owner'),
 };
 
 export {
@@ -28,4 +31,5 @@ export {
   addTaskTool,
   closeTaskTool,
   setPausedTool,
+  withdrawSol,
 };

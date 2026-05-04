@@ -11,6 +11,7 @@ import { launchToken } from './launch-token.js';
 import { swapToken } from './swap-token.js';
 import { buybackToken } from './buyback-token.js';
 import { sellToken } from './sell-token.js';
+import { fundAgentSol } from './fund-agent-sol.js';
 
 export const sharedTools = {
   getBalance:        withAuth(getBalance, 'public'),
@@ -19,6 +20,7 @@ export const sharedTools = {
   getTokenPrice:     withAuth(getTokenPrice, 'public'),
   getTokenMetadata:  withAuth(getTokenMetadata, 'public'),
   sleep:             withAuth(sleep, 'public'),
+  fundAgentSol:      withAuth(fundAgentSol, 'public'),
   registerAgent:     withAuth(registerAgent, 'owner'),
   delegateExecution: withAuth(delegateExecution, 'owner'),
   launchToken:       withAuth(launchToken, 'owner'),
@@ -29,5 +31,6 @@ export const sharedTools = {
 
 export {
   getBalance, getTokenBalances, getTransaction, getTokenPrice, getTokenMetadata, sleep,
+  fundAgentSol,
   registerAgent, delegateExecution, launchToken, swapToken, buybackToken, sellToken,
 };
