@@ -29,3 +29,19 @@ export function createUmi(): Umi {
 
   return umi;
 }
+
+let _keypairPubkeyCache: string | null = null;
+
+/**
+ * Returns the base58 public key of the agent keypair (AGENT_KEYPAIR).
+ * Cached after first call — the keypair is fixed for the process lifetime.
+ *
+ * Used to surface the keypair address in the LLM's system prefix so the
+ * agent can hand it to users for funding without spinning up a full Umi.
+ */
+export function getAgentKeypairPublicKey(): string {
+  if (_keypairPubkeyCache) return _keypairPubkeyCache;
+  const umi = createUmi();
+  _keypairPubkeyCache = umi.identity.publicKey.toString();
+  return _keypairPubkeyCache;
+}
