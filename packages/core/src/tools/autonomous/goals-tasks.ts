@@ -7,6 +7,7 @@ import {
   closeGoal,
   closeTask,
   err,
+  getGoalById,
   info,
   ok,
 } from '@metaplex-agent/shared';
@@ -126,6 +127,15 @@ export const addTaskTool = createTool({
     message: z.string().optional(),
   }),
   execute: async ({ description, goalId }) => {
+    // Validate goalId references a real goal before linking. A dangling
+    // goalId would silently corrupt the goal->tasks relationship and the
+    // model would have no way to recover (no list-goals tool by design).
+    if (goalId !== undefined && getGoalById(goalId) === null) {
+      return err(
+        'NOT_FOUND',
+        `No goal found with id ${goalId}. Use the goal id from the active-goals list, or omit goalId for a free-floating task.`,
+      );
+    }
     const task = addTask(description, goalId ?? null);
     return ok({
       taskId: task.id,

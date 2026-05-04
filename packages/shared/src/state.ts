@@ -107,15 +107,20 @@ export function getState(): AgentState {
     }
   }
   const d = defaults();
+  // Validate each field's *shape* before accepting it. A hand-edited or
+  // partially-migrated state file with e.g. `goals: {}` instead of an
+  // array would otherwise crash every subsequent `state.goals.filter(...)`
+  // call. We silently fall back to defaults — the next write replaces
+  // the malformed field with the corrected shape.
   return {
-    agentAssetAddress: raw.agentAssetAddress,
-    agentTokenMint: raw.agentTokenMint,
-    goals: raw.goals ?? d.goals,
-    tasks: raw.tasks ?? d.tasks,
-    journal: raw.journal ?? d.journal,
-    paused: raw.paused ?? d.paused,
-    errorStreak: raw.errorStreak ?? d.errorStreak,
-    lastTickAt: raw.lastTickAt ?? d.lastTickAt,
+    agentAssetAddress: typeof raw.agentAssetAddress === 'string' ? raw.agentAssetAddress : undefined,
+    agentTokenMint: typeof raw.agentTokenMint === 'string' ? raw.agentTokenMint : undefined,
+    goals: Array.isArray(raw.goals) ? raw.goals : d.goals,
+    tasks: Array.isArray(raw.tasks) ? raw.tasks : d.tasks,
+    journal: Array.isArray(raw.journal) ? raw.journal : d.journal,
+    paused: typeof raw.paused === 'boolean' ? raw.paused : d.paused,
+    errorStreak: Number.isInteger(raw.errorStreak) ? (raw.errorStreak as number) : d.errorStreak,
+    lastTickAt: typeof raw.lastTickAt === 'string' ? raw.lastTickAt : d.lastTickAt,
   };
 }
 
@@ -169,6 +174,11 @@ export function closeGoal(id: string, status: 'achieved' | 'abandoned'): Goal | 
   goals[idx] = updated;
   writeState({ ...state, goals });
   return updated;
+}
+
+/** Look up a goal by id without mutating state. Returns null if not found. */
+export function getGoalById(id: string): Goal | null {
+  return getState().goals.find((g) => g.id === id) ?? null;
 }
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,13 @@ export interface TickContext {
   goals: Goal[];
   /** Open tasks (filtered to status in ['pending', 'in_progress']). */
   openTasks: Task[];
+  /**
+   * Most recently closed tasks (status in ['done', 'failed']), sorted by
+   * completedAt desc. Lets the agent see what it just finished — the
+   * `result` field is the only durable record of completed work besides
+   * the bounded journal.
+   */
+  recentlyClosedTasks: Task[];
   /** Most recent journal entries (tail of the ring buffer). */
   recentJournal: JournalEntry[];
   /** Per-tick transaction cap that will apply to this run. */
@@ -77,6 +84,15 @@ export function buildTickPrompt(ctx: TickContext): string {
     }
   }
   lines.push('');
+
+  if (ctx.recentlyClosedTasks.length > 0) {
+    lines.push(`## Recently closed tasks (last ${ctx.recentlyClosedTasks.length})`);
+    for (const t of ctx.recentlyClosedTasks) {
+      const result = t.result ?? '(no result recorded)';
+      lines.push(`- ${t.id} [${t.status}] ${t.description} → ${result}`);
+    }
+    lines.push('');
+  }
 
   if (ctx.recentJournal.length > 0) {
     lines.push(`## Recent journal (last ${ctx.recentJournal.length})`);

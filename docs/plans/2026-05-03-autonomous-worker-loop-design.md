@@ -18,7 +18,7 @@ The owner-gated WebSocket server **stays on** in autonomous mode and becomes the
 
 ## 2. Architecture overview
 
-```
+```text
                                +--------------------------+
                                |   agent-state.json       |
                                |   - identity (existing)  |
@@ -237,7 +237,8 @@ set_paused({ paused: boolean, reason?: string }): { ok: true }
 ## 7. Files affected
 
 **New:**
-```
+
+```text
 packages/server/src/worker-loop.ts        # WorkerLoop class
 packages/server/src/build-tick-prompt.ts  # buildTickPrompt(context)
 packages/core/src/tools/autonomous/
@@ -247,7 +248,8 @@ packages/core/src/tools/autonomous/
 ```
 
 **Modified:**
-```
+
+```text
 packages/shared/src/types/agent.ts        # extended AgentState type
 packages/shared/src/state.ts              # default-fill new fields on read
 packages/shared/src/context.ts            # inject goals/tasks/journal/paused into AgentContext

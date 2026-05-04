@@ -173,15 +173,26 @@ const envSchema = z.object({
   ),
   // --- Autonomous-mode worker loop ---
   /** Sleep between ticks, in ms. Tick body runs to completion before sleeping. (autonomous mode only) */
-  TICK_INTERVAL_MS: z.coerce.number().int().min(1000).default(300000),
+  TICK_INTERVAL_MS: z.coerce.number().int().min(100).default(300000),
   /**
    * When true, transaction-submitting tools log "would have sent X" and
    * return a synthetic signature instead of submitting. Default-on so a
    * fresh fork can never accidentally spend on first boot. Flip to false
    * for production. (autonomous mode only)
+   *
+   * Safety: anything other than an explicit false-y string keeps dry-run
+   * ON. A typo like `AUTONOMOUS_DRY_RUN=ture` must NOT silently disable
+   * the safety net — only `false` / `0` (case-insensitive) or boolean
+   * `false` flip it off.
    */
   AUTONOMOUS_DRY_RUN: z.preprocess(
-    (v) => v === undefined ? true : v === 'true' || v === '1',
+    (v) => {
+      if (typeof v === 'boolean') return v;
+      if (v === undefined) return true;
+      const s = String(v).toLowerCase().trim();
+      if (s === 'false' || s === '0') return false;
+      return true; // unrecognized strings (incl. typos) stay safe
+    },
     z.boolean().default(true),
   ),
   /** Per-tick transaction submission cap. Resets every tick. (autonomous mode only) */

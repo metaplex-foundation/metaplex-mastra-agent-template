@@ -87,8 +87,15 @@ export class WorkerLoop {
       setLastTickAt(ts);
       return;
     }
-    if (state.goals.length === 0 && state.tasks.length === 0) {
-      console.log('[worker-loop] tick: idle (no goals; brief me via chat)');
+    // Idle check looks at *active* goals and *open* tasks only — completed/
+    // abandoned items live forever in state for audit, but they shouldn't
+    // keep the loop awake doing nothing.
+    const hasActiveGoals = state.goals.some((g) => g.status === 'active');
+    const hasOpenTasks = state.tasks.some(
+      (t) => t.status === 'pending' || t.status === 'in_progress',
+    );
+    if (!hasActiveGoals && !hasOpenTasks) {
+      console.log('[worker-loop] tick: idle (no active goals or open tasks; brief me via chat)');
       setLastTickAt(ts);
       return;
     }
@@ -103,11 +110,13 @@ export class WorkerLoop {
     const txCounter: TxCounter = { count: 0, max: config.MAX_TICK_TX_COUNT };
 
     // --- Construct the RequestContext: same shape as the chat path uses,
-    //     plus the per-tick TxCounter, and with connectedWallet=ownerWallet
-    //     so 'owner'-gated tools (set-goal, etc.) authorize the tick. ---
-    type ExtendedContext = AgentContext & { abortSignal: AbortSignal; connectedWallet: string };
+    //     plus the per-tick TxCounter. `withAuth` reads `walletAddress` as
+    //     the connectedWallet for owner gating (see shared/auth.ts), so we
+    //     set it to the resolved ownerWallet — the worker tick stands in
+    //     as the owner doing scheduled work. ---
+    type ExtendedContext = AgentContext & { abortSignal: AbortSignal };
     const requestContext = new RequestContext<ExtendedContext>([
-      ['walletAddress', null],
+      ['walletAddress', this.ownerWallet],
       ['transactionSender', null],
       ['agentMode', 'autonomous'],
       ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
@@ -115,7 +124,6 @@ export class WorkerLoop {
       ['agentFeeSol', config.AGENT_FEE_SOL],
       ['tokenOverride', config.TOKEN_OVERRIDE ?? null],
       ['ownerWallet', this.ownerWallet],
-      ['connectedWallet', this.ownerWallet], // tick auth: worker stands in as owner
       ['txCounter', txCounter],
       ['abortSignal', tickAbort.signal],
     ]);
@@ -189,6 +197,11 @@ export class WorkerLoop {
       }
     }
 
+    const recentlyClosedTasks = state.tasks
+      .filter((t) => t.status === 'done' || t.status === 'failed')
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+      .slice(0, 5);
+
     return {
       nowIso: ts,
       agentKeypairAddress,
@@ -197,6 +210,7 @@ export class WorkerLoop {
       agentPdaBalanceSol,
       goals: state.goals.filter((g) => g.status === 'active'),
       openTasks: state.tasks.filter((t) => t.status === 'pending' || t.status === 'in_progress'),
+      recentlyClosedTasks,
       recentJournal: state.journal.slice(-5),
       txCapMax: config.MAX_TICK_TX_COUNT,
       dryRun: config.AUTONOMOUS_DRY_RUN,
