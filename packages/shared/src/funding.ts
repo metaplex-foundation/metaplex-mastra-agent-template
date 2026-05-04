@@ -78,6 +78,7 @@ export async function ensureAgentFunded(
     agentFeeSol: 0,
     tokenOverride: ctx.tokenOverride,
     ownerWallet: ctx.ownerWallet,
+    txCounter: ctx.txCounter,
   };
 
   await submitOrSend(umi, builder, fundingContext, {

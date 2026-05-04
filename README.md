@@ -171,21 +171,34 @@ Each WebSocket connection is its own session (isolated wallet, conversation hist
 - `submitOrSend()` builds the transaction, prepends the agent fee, serializes to base64, pushes it through the `TransactionSender`, and **awaits** the user's signature via a correlation-ID-keyed promise (see [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md)).
 - The tool returns the real signature (or throws on rejection/timeout).
 
-### Autonomous Mode (agent-signed txs)
+### Autonomous Mode (agent-signed txs, worker loop)
 
 ```
 AGENT_MODE=autonomous
 AGENT_KEYPAIR=<base58-encoded secret key>
 BOOTSTRAP_WALLET=<base58 pubkey>   # required until the agent registers on-chain
+TICK_INTERVAL_MS=300000            # default 5 min
+AUTONOMOUS_DRY_RUN=true            # default true — flip to false in production
+MAX_TICK_TX_COUNT=3                # default 3 — per-tick tx cap
 ```
 
-The agent signs and submits transactions directly with its keypair. Only the on-chain asset owner (or `BOOTSTRAP_WALLET` bootstrap fallback) is allowed to interact — non-owner WebSocket connections are rejected at the connection gate before the LLM is ever invoked.
+In autonomous mode the agent runs on a **worker loop** — every `TICK_INTERVAL_MS` it wakes up, reads goals + tasks + recent journal from `agent-state.json`, and decides whether to act. The agent signs and submits transactions directly with its keypair.
 
-**Use cases:** portfolio rebalancer, trading bot, automated treasury manager, any agent that acts independently.
+The owner-gated WebSocket server **stays on** in autonomous mode and becomes the **configuration interface**: brief the agent through chat ("your goal is to DCA into MPLX"), inspect goals/tasks in the debug panel, pause via chat. No env-var prompt engineering, no redeploys to change strategy.
+
+**Use cases:** treasury rebalancer, scheduled buybacks, DCA bot, watcher daemon — any agent that acts on a timer without a human in the loop.
+
+**Safety defaults:**
+- `AUTONOMOUS_DRY_RUN=true` is **on by default**. Transaction-submitting tools log "would have sent X" and return synthetic `DRYRUN_*` signatures instead of broadcasting. Flip to `false` once you've verified behavior end-to-end.
+- `MAX_TICK_TX_COUNT` caps how many transactions the agent can submit in one tick. Resets each tick.
+- Three consecutive failed ticks auto-pause the loop (`paused=true` in state, journal entry recorded). The owner unpauses via chat after fixing whatever broke.
 
 **How it works:**
 - `createUmi()` decodes `AGENT_KEYPAIR`, creates a signer, and sets it as the Umi identity and fee payer.
-- `submitOrSend()` calls `builder.sendAndConfirm(umi)` and returns the base58 signature.
+- `submitOrSend()` calls `builder.sendAndConfirm(umi)` and returns the base58 signature (or a `DRYRUN_*` stub if dry-run is on).
+- The worker loop attaches a per-tick `TxCounter` to `requestContext`; `submitOrSend` enforces the cap before broadcasting.
+
+See [`docs/plans/2026-05-03-autonomous-worker-loop-design.md`](./docs/plans/2026-05-03-autonomous-worker-loop-design.md) for the full design.
 
 ---
 

@@ -122,16 +122,24 @@ The template supports two operating modes, controlled by the `AGENT_MODE` enviro
 
 ### 3.2 Autonomous Mode (`AGENT_MODE=autonomous`)
 
-**Target use case:** Agents that act independently with their own funds, controlled by their owner.
+**Target use case:** Agents that act independently with their own funds, controlled by their owner. The agent runs on a **worker loop** that ticks on a timer; the WebSocket server stays on as the configuration / inspection interface.
 
 **Behavior:**
-- **Only the asset owner can interact.** All other connections are rejected at the WebSocket layer before the LLM is ever invoked (see §3.4 Owner Resolution, §5.3 Tool Authorization).
-- Agent signs and submits all transactions itself using its keypair
-- Owner must connect their wallet via `wallet_connect` to be verified
-- No fee prepending (agent self-funds)
-- Trading funds sit in the agent's keypair wallet
+- **Worker loop** wakes up every `TICK_INTERVAL_MS`, reads goals + tasks + recent journal from `agent-state.json`, and decides whether to act. Each tick is a fresh `agent.generate()` call — long-term memory lives in state, not in a rolling LLM context.
+- **Only the asset owner can interact via WebSocket.** All other connections are rejected at the WebSocket layer before the LLM is ever invoked (see §3.4 Owner Resolution, §5.3 Tool Authorization).
+- The owner-gated WS becomes the **configuration interface**: brief goals via chat, inspect state in the debug panel, pause via chat. No env-var prompt engineering, no redeploy to change strategy.
+- Agent signs and submits all transactions itself using its keypair.
+- No fee prepending (agent self-funds).
+- Trading funds sit in the agent's keypair wallet; `register-agent`'s asset signer PDA is the durable treasury.
 
-**Example use cases:** Portfolio rebalancers, trading bots, automated treasury managers, DeFi strategy agents.
+**Safety defaults:**
+- `AUTONOMOUS_DRY_RUN=true` is on by default — transaction-submitting tools log "would have sent X" and return synthetic `DRYRUN_*` signatures. Operators flip to `false` after end-to-end verification.
+- `MAX_TICK_TX_COUNT` (default 3) caps tx submissions per tick. `submitOrSend` reads a per-tick `TxCounter` from `requestContext` and refuses on overflow.
+- Three consecutive failed ticks auto-pause the loop (`paused=true` in state). The owner unpauses via chat after fixing whatever broke.
+
+See [`docs/plans/2026-05-03-autonomous-worker-loop-design.md`](./plans/2026-05-03-autonomous-worker-loop-design.md) for the full design.
+
+**Example use cases:** Treasury rebalancers, scheduled buybacks, DCA bots, watcher daemons, DeFi strategy agents.
 
 ### 3.3 Mode Comparison
 

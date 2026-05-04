@@ -95,11 +95,34 @@ export class PlexChatServer {
   private agent: ReturnType<typeof createAgent>;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  // Resolves once start() has finished its async preflight + owner-resolution
+  // phase. Lets the orchestrator (index.ts) wait before booting the worker
+  // loop so the loop's first tick has a populated ownerWallet.
+  private readyPromise: Promise<void>;
+  private resolveReady: () => void = () => {};
 
   private static readonly MAX_HISTORY = 50;
 
   constructor() {
     this.agent = createAgent();
+    this.readyPromise = new Promise<void>((resolve) => {
+      this.resolveReady = resolve;
+    });
+  }
+
+  /** Resolves once startup is complete (preflight + owner resolution done). */
+  whenReady(): Promise<void> {
+    return this.readyPromise;
+  }
+
+  /** Returns the Mastra agent instance. Stable for the lifetime of the server. */
+  getAgent(): ReturnType<typeof createAgent> {
+    return this.agent;
+  }
+
+  /** Returns the resolved owner wallet, or null if resolution failed / not yet ready. */
+  getOwnerWallet(): string | null {
+    return this.ownerWallet;
   }
 
   /**
@@ -222,6 +245,8 @@ export class PlexChatServer {
           'Hint: set BOOTSTRAP_WALLET in .env (or register the agent) to enable owner-gated tools',
         );
       }
+
+      this.resolveReady();
     });
   }
 
