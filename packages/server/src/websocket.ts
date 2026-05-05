@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createServer, type IncomingMessage, type Server as HttpServer } from 'http';
-import { timingSafeEqual, randomUUID } from 'crypto';
+import { createServer, type Server as HttpServer } from 'http';
+import { randomUUID } from 'crypto';
 import { publicKey } from '@metaplex-foundation/umi';
 import {
   getConfig,
@@ -9,10 +9,18 @@ import {
   createUmi,
   getAgentKeypairPublicKey,
   getAgentPda,
+  buildSiwsMessage,
+  verifySiwsSignature,
+  NonceStore,
+  isAuthorized,
+  AllowlistFile,
   type ServerMessage,
   type TransactionSender,
   type AgentContext,
   type ClientMessage,
+  type ClientAuthResponse,
+  type ServerAuthChallenge,
+  type ServerAuthError,
 } from '@metaplex-agent/shared';
 import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';
 import { RequestContext } from '@mastra/core/request-context';
@@ -30,40 +38,12 @@ const TX_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const SAFE_REASON_RE = /^[\w\s.,:;'"()?!\-]{0,200}$/;
 
 /**
- * Subprotocol name used for the Sec-WebSocket-Protocol auth path (C3).
- * Clients send `['bearer', '<token>']`; server echoes back `'bearer'`.
- */
-const BEARER_SUBPROTOCOL = 'bearer';
-
-/**
  * Strip characters that could close / inject into the `[Agent: … | User wallet: X]`
  * prefix the agent sees (C1). Also caps length so an attacker can't pad it
  * into context bloat. 88 chars comfortably holds any valid base58 address.
  */
 function sanitizeForPrefix(s: string): string {
   return s.replace(/[\[\]\r\n]/g, '').slice(0, 88);
-}
-
-/**
- * Extract the `bearer.<token>` subprotocol token from a Sec-WebSocket-Protocol
- * header (C3). Also accepts the two-element form `['bearer', '<token>']`.
- * Returns null if no bearer token is present.
- */
-function extractSubprotocolToken(headerValue: string | undefined): string | null {
-  if (!headerValue) return null;
-  const parts = headerValue.split(',').map((p) => p.trim()).filter((p) => p.length > 0);
-  // Two-element form: ['bearer', '<token>']
-  if (parts.length === 2 && parts[0] === BEARER_SUBPROTOCOL) {
-    return parts[1] ?? null;
-  }
-  // Compact form: 'bearer.<token>'
-  for (const p of parts) {
-    if (p.startsWith(`${BEARER_SUBPROTOCOL}.`)) {
-      const tok = p.slice(BEARER_SUBPROTOCOL.length + 1);
-      if (tok.length > 0) return tok;
-    }
-  }
-  return null;
 }
 
 /**
@@ -97,6 +77,9 @@ export class PlexChatServer {
   private ownerWallet: string | null = null;
   private agent: ReturnType<typeof createAgent>;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
+  private nonceSweepInterval: ReturnType<typeof setInterval> | null = null;
+  private nonceStore: NonceStore;
+  private allowlistFile: AllowlistFile;
   private stopped = false;
   // Resolves once start() has finished its async preflight + owner-resolution
   // phase. Lets the orchestrator (index.ts) wait before booting the worker
@@ -110,6 +93,16 @@ export class PlexChatServer {
     this.agent = createAgent();
     this.readyPromise = new Promise<void>((resolve) => {
       this.resolveReady = resolve;
+    });
+    const config = getConfig();
+    this.nonceStore = new NonceStore({ ttlMs: config.AUTH_NONCE_TTL_MS });
+    this.allowlistFile = new AllowlistFile({
+      // v1: hard-coded path at the workspace root (process.cwd()), matching
+      // the agent-state.json convention. A future task may add a
+      // WALLET_ALLOWLIST_PATH env var if operators need a different location.
+      path: 'wallets.allowlist.json',
+      envFallback: config.WALLET_ALLOWLIST,
+      pollIntervalMs: 5_000,
     });
   }
 
@@ -197,19 +190,10 @@ export class PlexChatServer {
         });
         cb(false, 403, 'Forbidden origin');
       },
-      // C3: Subprotocol negotiation. If the client requested the `bearer`
-      // subprotocol, echo it back so the handshake succeeds. The token is
-      // validated in handleConnection, not here. If no subprotocol is sent
-      // (query / Authorization header auth paths) the handshake still
-      // succeeds — `ws` treats `false` as "no subprotocol agreed upon".
-      handleProtocols: (protocols: Set<string>) => {
-        if (protocols.has(BEARER_SUBPROTOCOL)) return BEARER_SUBPROTOCOL;
-        return false;
-      },
     });
 
-    this.wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
-      this.handleConnection(ws, req);
+    this.wss.on('connection', (ws: WebSocket) => {
+      this.handleConnection(ws);
     });
 
     this.wss.on('error', (err) => {
@@ -224,6 +208,11 @@ export class PlexChatServer {
         }
       }
     }, 30000);
+
+    // Periodic nonce sweep to bound memory under SIWS-flood. The store is
+    // unbounded by design; sweep evicts expired entries.
+    this.nonceSweepInterval = setInterval(() => this.nonceStore.sweep(), 60_000);
+    this.nonceSweepInterval.unref?.();
 
     this.httpServer.listen(port, async () => {
       console.log(`PlexChat WebSocket server running on ws://localhost:${port}`);
@@ -265,6 +254,13 @@ export class PlexChatServer {
       this.pingInterval = null;
     }
 
+    if (this.nonceSweepInterval) {
+      clearInterval(this.nonceSweepInterval);
+      this.nonceSweepInterval = null;
+    }
+
+    this.allowlistFile.stop();
+
     for (const [ws, session] of this.sessions) {
       session.cleanup('Server shutting down');
       if (ws.readyState === WebSocket.OPEN) {
@@ -285,23 +281,12 @@ export class PlexChatServer {
   }
 
   /**
-   * Handle a new WebSocket connection. Validates the auth token
-   * and sets up message handlers.
+   * Handle a new WebSocket connection. Sets up handlers, sends the SIWS
+   * auth challenge, and arms the handshake timeout. The session stays
+   * `unauthenticated` until a valid `auth_response` arrives.
    */
-  private handleConnection(ws: WebSocket, req: IncomingMessage): void {
+  private handleConnection(ws: WebSocket): void {
     const config = getConfig();
-
-    // --- Authentication (constant-time comparison) ---
-    const token = this.extractToken(req);
-    if (!this.secureTokenCompare(token, config.WEB_CHANNEL_TOKEN)) {
-      this.logAuthFailure('token_mismatch', {
-        remote: req.socket.remoteAddress ?? null,
-        origin: req.headers.origin ?? null,
-        hadToken: token !== null,
-      });
-      ws.close(4001, 'Unauthorized');
-      return;
-    }
 
     // --- Connection limit ---
     if (this.sessions.size >= config.MAX_CONNECTIONS) {
@@ -345,57 +330,40 @@ export class PlexChatServer {
 
     // --- Send connected message ---
     session.send({ type: 'connected', jid: `web:${session.id}` });
-    this.emitContext(session);
+
+    // --- Issue SIWS auth challenge ---
+    const issued = this.nonceStore.issue();
+    session.pendingNonce = issued.nonce;
+    const network: 'solana-mainnet' | 'solana-devnet' =
+      config.SOLANA_RPC_URL.includes('devnet') ? 'solana-devnet' : 'solana-mainnet';
+    const challenge: ServerAuthChallenge = {
+      type: 'auth_challenge',
+      nonce: issued.nonce,
+      issuedAt: issued.issuedAt,
+      expiresAt: issued.expiresAt,
+      agentName: config.ASSISTANT_NAME,
+      agentAsset: config.AGENT_ASSET_ADDRESS ?? null,
+      network,
+      // AGENT_AUTH_MODE is always populated after getConfig()'s post-parse
+      // resolution — the schema marks it optional only because the env-var
+      // form is optional (auto-resolved from AGENT_MODE + WALLET_ALLOWLIST).
+      authMode: config.AGENT_AUTH_MODE!,
+    };
+    session.send(challenge);
+
+    session.authTimeout = setTimeout(() => {
+      if (session.authStatus !== 'authenticated') {
+        this.sendAuthError(session, 'auth_timeout', 'Did not authenticate in time.');
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close(4001, 'auth_timeout');
+        }
+      }
+    }, config.AUTH_HANDSHAKE_TIMEOUT_MS);
 
     // --- Message handler ---
     ws.on('message', (data: RawData) => {
       this.handleMessage(session, data);
     });
-  }
-
-  /**
-   * Constant-time token comparison to prevent timing attacks.
-   */
-  private secureTokenCompare(provided: string | null, expected: string): boolean {
-    if (!provided) return false;
-    try {
-      const a = Buffer.from(provided);
-      const b = Buffer.from(expected);
-      if (a.length !== b.length) return false;
-      return timingSafeEqual(a, b);
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Extract the auth token from the request. Checked in priority order:
-   *   1. `Sec-WebSocket-Protocol: bearer, <token>` (C3, preferred; not logged
-   *      by most reverse proxies).
-   *   2. `Authorization: Bearer <token>` header.
-   *   3. `?token=<token>` query parameter (legacy; tokens can leak via
-   *      Referer / access logs — deprecated but kept for curl convenience).
-   */
-  private extractToken(req: IncomingMessage): string | null {
-    // C3: Sec-WebSocket-Protocol bearer subprotocol
-    const subprotoHeader = req.headers['sec-websocket-protocol'];
-    const subprotoToken = extractSubprotocolToken(
-      Array.isArray(subprotoHeader) ? subprotoHeader.join(',') : subprotoHeader,
-    );
-    if (subprotoToken) return subprotoToken;
-
-    // Authorization header
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      return authHeader.slice(7);
-    }
-
-    // Legacy query parameter
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-    const queryToken = url.searchParams.get('token');
-    if (queryToken) return queryToken;
-
-    return null;
   }
 
   /**
@@ -441,7 +409,30 @@ export class PlexChatServer {
    * Handle an incoming WebSocket message.
    */
   private async handleMessage(session: Session, data: RawData): Promise<void> {
-    // Rate limiting
+    // --- Pre-auth gate: only auth_response is accepted ---
+    // We parse first (before the rate limiter) so that pre-auth messages
+    // don't count against the post-auth budget. This is intentional: the
+    // SIWS handshake is a fixed cost capped by AUTH_HANDSHAKE_TIMEOUT_MS,
+    // not a per-message rate.
+    if (session.authStatus === 'unauthenticated') {
+      let parsed: ClientMessage;
+      try {
+        parsed = JSON.parse(data.toString());
+      } catch {
+        return this.failAuth(session, 'message_mismatch', 'Invalid JSON during auth.');
+      }
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        (parsed as { type?: unknown }).type !== 'auth_response'
+      ) {
+        return this.failAuth(session, 'not_authorized', 'auth_response expected.');
+      }
+      await this.handleAuthResponse(session, parsed as ClientAuthResponse);
+      return;
+    }
+
+    // Rate limiting (post-auth only)
     if (!session.rateLimiter.allow()) {
       this.logAuthFailure('rate_limit', { sessionId: session.id });
       session.send({ type: 'error', error: 'Rate limit exceeded. Please slow down.', code: 'RATE_LIMIT' });
@@ -463,53 +454,6 @@ export class PlexChatServer {
       return;
     }
 
-    // --- Autonomous mode connection gate ---
-    // Only the asset owner can invoke the LLM; non-owner messages are rejected
-    // before the agent is ever called. Wallet handshake messages
-    // (wallet_connect / wallet_disconnect) are control-plane and pass through —
-    // gating disconnect would also fire the rejection on page refresh, when the
-    // UI sends a transient disconnect before the wallet adapter has restored.
-    const config = getConfig();
-    const isAuthHandshake = msg.type === 'wallet_connect' || msg.type === 'wallet_disconnect';
-    if (config.AGENT_MODE === 'autonomous' && !isAuthHandshake) {
-      if (!session.isOwnerVerified) {
-        this.logAuthFailure('autonomous_not_verified', {
-          sessionId: session.id,
-          msgType: msg.type,
-        });
-        session.send({
-          type: 'error',
-          error: 'This agent only accepts commands from its owner. Please connect your wallet first.',
-          code: 'NOT_OWNER',
-        });
-        return;
-      }
-
-      // C5: Re-resolve owner on every autonomous turn to close the TOCTOU
-      // window. The owner cache makes this effectively O(1); on a genuine
-      // on-chain ownership change the stale verification is cleared.
-      if (msg.type === 'message') {
-        const currentOwner = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
-        if (!currentOwner || session.walletAddress !== currentOwner) {
-          this.logAuthFailure('autonomous_owner_changed', {
-            sessionId: session.id,
-            session_wallet: session.walletAddress,
-            current_owner: currentOwner,
-          });
-          session.isOwnerVerified = false;
-          this.ownerWallet = currentOwner;
-          session.send({
-            type: 'error',
-            error:
-              'Owner verification is stale. The connected wallet is no longer the owner. ' +
-              'Please reconnect.',
-            code: 'NOT_OWNER',
-          });
-          return;
-        }
-      }
-    }
-
     switch (msg.type) {
       case 'message':
         if (typeof msg.content !== 'string') {
@@ -521,12 +465,6 @@ export class PlexChatServer {
         } else {
           await this.handleChatMessage(session, msg.content, msg.sender_name);
         }
-        break;
-      case 'wallet_connect':
-        await this.handleWalletConnect(session, msg.address);
-        break;
-      case 'wallet_disconnect':
-        this.handleWalletDisconnect(session);
         break;
       case 'tx_result':
         this.handleTxResult(session, msg.correlationId, msg.signature);
@@ -545,6 +483,107 @@ export class PlexChatServer {
         });
       }
     }
+  }
+
+  /**
+   * Verify an `auth_response`: validate input shape, consume the pending
+   * nonce, verify the SIWS signature, run the auth-tier check, and promote
+   * the session to `authenticated`. Any failure path closes the socket
+   * with code 4001 via `failAuth`.
+   */
+  private async handleAuthResponse(session: Session, msg: ClientAuthResponse): Promise<void> {
+    const config = getConfig();
+
+    // Defensive shape validation — TS says this is a ClientAuthResponse, but
+    // the data was just JSON.parsed from an attacker-controlled string.
+    if (
+      typeof msg.publicKey !== 'string' ||
+      typeof msg.signature !== 'string' ||
+      typeof msg.message !== 'string' ||
+      !BASE58_ADDRESS_RE.test(msg.publicKey)
+    ) {
+      return this.failAuth(session, 'message_mismatch', 'auth_response fields invalid.');
+    }
+
+    // Consume the pending nonce. Single-use, ttl-bounded; consume-before-verify
+    // is the replay defense (a replayed valid signature with a consumed nonce
+    // fails on consume rather than reaching the crypto path).
+    if (!session.pendingNonce) {
+      return this.failAuth(session, 'nonce_invalid', 'No pending nonce.');
+    }
+    const consumedNonce = session.pendingNonce;
+    session.pendingNonce = null;
+    const consumeResult = this.nonceStore.consume(consumedNonce);
+    if (!consumeResult.ok) {
+      return this.failAuth(session, consumeResult.reason, 'Nonce rejected.');
+    }
+
+    // Require the signed message to literally contain the issued nonce. We
+    // don't store issuedAt/expiresAt with the nonce, so we use the nonce
+    // string as a tamper-resistant tag — combined with the signature check,
+    // a client can't substitute their own message text without invalidating
+    // either the nonce match or the signature.
+    if (!msg.message.includes(`Nonce: ${consumedNonce}`)) {
+      return this.failAuth(session, 'message_mismatch', 'Signed message does not contain expected nonce.');
+    }
+
+    // Verify the Ed25519 signature.
+    if (!verifySiwsSignature({
+      message: msg.message,
+      signatureBase58: msg.signature,
+      publicKeyBase58: msg.publicKey,
+    })) {
+      return this.failAuth(session, 'signature_invalid', 'Bad signature.');
+    }
+
+    // Auth-tier check. Owner is always authorized regardless of tier.
+    const owner = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
+    const allowed = isAuthorized({
+      // AGENT_AUTH_MODE is always populated after getConfig()'s post-parse
+      // resolution; see the comment in handleConnection for context.
+      mode: config.AGENT_AUTH_MODE!,
+      publicKey: msg.publicKey,
+      owner,
+      allowlist: this.allowlistFile.current(),
+    });
+    if (!allowed) {
+      return this.failAuth(session, 'not_authorized', 'Wallet not authorized for this agent.');
+    }
+
+    // Promote session to authenticated state.
+    session.authStatus = 'authenticated';
+    session.walletAddress = msg.publicKey;
+    session.isOwnerVerified = owner !== null && msg.publicKey === owner;
+    if (session.authTimeout) {
+      clearTimeout(session.authTimeout);
+      session.authTimeout = null;
+    }
+    this.ownerWallet = owner;
+
+    session.send({
+      type: 'authenticated',
+      walletAddress: msg.publicKey,
+      isOwner: session.isOwnerVerified,
+      sessionId: session.id,
+    });
+    this.emitContext(session);
+  }
+
+  /**
+   * Send an `auth_error` and close the socket with code 4001. Logs the
+   * failure for observability. Use `sendAuthError` directly if you need
+   * to send an error without closing.
+   */
+  private failAuth(session: Session, code: ServerAuthError['code'], message: string): void {
+    this.sendAuthError(session, code, message);
+    this.logAuthFailure('siws_' + code, { sessionId: session.id });
+    if (session.ws.readyState === WebSocket.OPEN) {
+      session.ws.close(4001, code);
+    }
+  }
+
+  private sendAuthError(session: Session, code: ServerAuthError['code'], message: string): void {
+    session.send({ type: 'auth_error', code, message });
   }
 
   /**
@@ -1020,73 +1059,6 @@ export class PlexChatServer {
         feeSol: options?.feeSol,
       });
     });
-  }
-
-  /**
-   * Handle wallet_connect: store address on the session, verify owner in autonomous mode,
-   * and send confirmation.
-   */
-  private async handleWalletConnect(session: Session, address: string | undefined): Promise<void> {
-    if (!address?.trim()) {
-      session.send({
-        type: 'error',
-        error: 'wallet_connect requires a non-empty address string',
-        code: 'INVALID_ADDRESS',
-      });
-      return;
-    }
-
-    if (!BASE58_ADDRESS_RE.test(address)) {
-      session.send({
-        type: 'error',
-        error: 'Invalid wallet address format',
-        code: 'INVALID_ADDRESS',
-      });
-      return;
-    }
-
-    const config = getConfig();
-
-    // Re-resolve owner (asset may have been registered since startup)
-    this.ownerWallet = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
-
-    // --- Autonomous mode owner gate ---
-    if (config.AGENT_MODE === 'autonomous') {
-      if (!this.ownerWallet) {
-        session.send({
-          type: 'error',
-          error: 'No owner could be resolved from the on-chain asset. Authorization is unavailable.',
-          code: 'NO_OWNER',
-        });
-        return;
-      }
-
-      if (address !== this.ownerWallet) {
-        session.isOwnerVerified = false;
-        session.send({
-          type: 'error',
-          error: 'This agent only accepts commands from its owner. The connected wallet is not the owner.',
-          code: 'NOT_OWNER',
-        });
-        return;
-      }
-
-      session.isOwnerVerified = true;
-    }
-
-    session.walletAddress = address;
-    session.send({ type: 'wallet_connected', address });
-    this.emitContext(session);
-  }
-
-  /**
-   * Handle wallet_disconnect: clear the session's address and verification.
-   */
-  private handleWalletDisconnect(session: Session): void {
-    session.walletAddress = null;
-    session.isOwnerVerified = false;
-    session.send({ type: 'wallet_disconnected' });
-    this.emitContext(session);
   }
 
   private emitContext(session: Session): void {
