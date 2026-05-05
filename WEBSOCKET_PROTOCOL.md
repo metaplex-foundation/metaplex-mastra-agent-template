@@ -12,7 +12,7 @@ The Metaplex Agent Template exposes a WebSocket server implementing the **PlexCh
 > - Legacy `?token=<auth-token>`, `Sec-WebSocket-Protocol: bearer, <token>`, and `Authorization: Bearer ...` are **no longer accepted**.
 > - `wallet_connect` / `wallet_disconnect` (C2S) and `wallet_connected` / `wallet_disconnected` (S2C) are **removed** — the wallet is fixed by the SIWS handshake.
 > - New tiered authorization via `AGENT_AUTH_MODE` (`owner` / `allowlist` / `open`).
-> - New per-wallet handshake rate limit; repeated failures yield `wallet_rate_limit`.
+> - New per-wallet sliding-window rate limit on **post-auth** chat-plane messages, complementing the existing per-session limiter.
 > - New S2C messages: `auth_challenge`, `authenticated`, `auth_error`. New C2S message: `auth_response`.
 >
 > **v1.1 changes vs v1.0:** transactions now carry a server-assigned `correlationId`; `tx_result` requires `correlationId` + `signature`; new `tx_error` client message; all server -> client messages are unicast to the originating session (no cross-client broadcast); per-session wallet/conversation state.
@@ -195,9 +195,10 @@ If authentication fails for any reason, the server emits an `auth_error` and the
 | `signature_invalid` | Ed25519 verification of `(message, signature, publicKey)` failed |
 | `not_authorized` | The wallet is valid but not allowed by the current `AGENT_AUTH_MODE` tier |
 | `auth_timeout` | The client did not send `auth_response` within `AUTH_HANDSHAKE_TIMEOUT_MS` |
-| `wallet_rate_limit` | Too many recent failed handshakes from this wallet (or IP) |
 
-The client hook **must** treat `4001` as terminal and **must NOT** auto-reconnect — doing so burns nonces, may lock out the wallet via `wallet_rate_limit`, and will never recover the session. Surface the failure reason to the user instead and require an explicit retry.
+The client hook **must** treat `4001` as terminal and **must NOT** auto-reconnect — doing so burns nonces and never recovers the session. Surface the failure reason to the user instead and require an explicit retry.
+
+**Note:** Once a session is authenticated, exceeding the per-wallet sliding-window rate limit (60 chat messages / 60 seconds by default; see `WALLET_RATE_LIMIT_*`) yields a regular `error` message with `code: "RATE_LIMIT"` — not an `auth_error`, and the socket stays open.
 
 ---
 
@@ -482,7 +483,7 @@ Sent when the SIWS handshake fails for any reason. Always followed by `ws.close(
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | `string` | Always `"auth_error"` |
-| `code` | `string` | One of: `nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout`, `wallet_rate_limit` |
+| `code` | `string` | One of: `nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout` |
 | `message` | `string` | Human-readable explanation, safe to surface to the user |
 
 **Delivery:**
@@ -829,7 +830,7 @@ To switch wallets, the client must close the WebSocket and re-authenticate with 
    The wallet that signs the `auth_challenge` is the wallet bound to the session. There is no separate `wallet_connect` step. Only emit chat-plane messages (`message`, `tx_result`, `tx_error`) after `authenticated`.
 
 2. **Do not auto-reconnect on close code `4001`**
-   `4001` is terminal. Auto-reconnecting burns nonces, may trip `wallet_rate_limit`, and never recovers. Surface the `auth_error.code` to the user and require an explicit retry.
+   `4001` is terminal. Auto-reconnecting burns nonces and never recovers. Surface the `auth_error.code` to the user and require an explicit retry.
 
 3. **Construct the canonical SIWS message exactly**
    Including the blank line after the greeting. Wallets render the string verbatim — any difference between what the wallet shows and what the server expects fails verification.
@@ -982,7 +983,7 @@ ws.on('close', (code, reason) => {
    Nonces are single-use and TTL-bounded (`AUTH_NONCE_TTL_MS`, default 60s). Stolen `auth_response` payloads cannot be reused after the original session consumes the nonce, and stale signatures fail verification once the TTL elapses.
 
 6. **Per-Wallet Rate Limiting**
-   The server enforces a sliding-window rate limit on failed handshakes per wallet (and per IP for unauthenticated attempts). Excess attempts yield `wallet_rate_limit`. Clients that auto-reconnect on `4001` will trip this limit and lock themselves out.
+   Once a wallet has authenticated, the server enforces a sliding-window rate limit on chat-plane messages (default 60 / 60 s, configurable via `WALLET_RATE_LIMIT_*`). The cap aggregates across all of that wallet's concurrent sessions, so a single wallet opening multiple WebSockets cannot multiply its budget. The owner is exempt. Excess messages yield `{type: "error", code: "RATE_LIMIT"}` and the socket stays open.
 
 7. **Transaction Verification**
    Always verify transaction contents on the client side before signing. The agent may make mistakes or be compromised.
