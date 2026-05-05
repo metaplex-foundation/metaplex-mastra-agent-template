@@ -34,13 +34,18 @@ export interface SimpleRateLimiter {
   allow(): boolean;
 }
 
+export type AuthStatus = 'unauthenticated' | 'authenticated';
+
 export class Session {
   readonly id: string;
   readonly ws: WebSocket;
 
   // Identity & auth
+  authStatus: AuthStatus = 'unauthenticated';
   walletAddress: string | null = null;
   isOwnerVerified = false;
+  pendingNonce: string | null = null;
+  authTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Conversation
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -93,6 +98,10 @@ export class Session {
     if (this.aliveCheck) {
       clearInterval(this.aliveCheck);
       this.aliveCheck = null;
+    }
+    if (this.authTimeout) {
+      clearTimeout(this.authTimeout);
+      this.authTimeout = null;
     }
     if (this.currentAbortController) {
       this.currentAbortController.abort();
