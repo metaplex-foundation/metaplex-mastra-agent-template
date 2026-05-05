@@ -183,37 +183,84 @@ async function main(): Promise<void> {
   // 5. Render .env
   const examplePath = resolve(ROOT, '.env.example');
   let envContent = existsSync(examplePath) ? readFileSync(examplePath, 'utf8') : '';
-  envContent = envContent
-    .replace(/^AGENT_MODE=.*$/m, `AGENT_MODE=${mode}`)
-    .replace(/^AGENT_KEYPAIR=.*$/m, `AGENT_KEYPAIR=${agentKeypair}`)
-    .replace(/^ANTHROPIC_API_KEY=.*$/m, `${providerKey === 'ANTHROPIC_API_KEY' ? '' : '# '}ANTHROPIC_API_KEY=${providerKey === 'ANTHROPIC_API_KEY' ? llmKey : ''}`)
-    .replace(/^# OPENAI_API_KEY=.*$/m, `${providerKey === 'OPENAI_API_KEY' ? '' : '# '}OPENAI_API_KEY=${providerKey === 'OPENAI_API_KEY' ? llmKey : ''}`)
-    .replace(/^# GOOGLE_GENERATIVE_AI_API_KEY=.*$/m, `${providerKey === 'GOOGLE_GENERATIVE_AI_API_KEY' ? '' : '# '}GOOGLE_GENERATIVE_AI_API_KEY=${providerKey === 'GOOGLE_GENERATIVE_AI_API_KEY' ? llmKey : ''}`)
-    .replace(/^WALLET_ALLOWLIST=.*$/m, `WALLET_ALLOWLIST=${walletAllowlist}`)
-    .replace(/^# BOOTSTRAP_WALLET=.*$/m, bootstrapWallet ? `BOOTSTRAP_WALLET=${bootstrapWallet}` : '# BOOTSTRAP_WALLET=');
 
-  // If the LLM_MODEL line isn't present in the slim example (it's a default),
-  // write the chosen model when the user picked something other than Anthropic.
-  if (llmModel !== 'anthropic/claude-sonnet-4-5-20250929' && !envContent.match(/^LLM_MODEL=/m)) {
-    envContent = envContent.replace(
-      /^# LLM\. One key required.*$/m,
-      `# LLM. One key required.\nLLM_MODEL=${llmModel}`,
-    );
+  // `replaceOrAppend` performs the substitution and returns whether the
+  // pattern matched. If a customised .env.example dropped one of the keys
+  // we expect, we append the canonical line at the bottom rather than
+  // letting the value silently disappear.
+  const appended: string[] = [];
+  function replaceOrAppend(re: RegExp, line: string): void {
+    if (re.test(envContent)) {
+      envContent = envContent.replace(re, line);
+    } else {
+      appended.push(line);
+    }
+  }
+
+  replaceOrAppend(/^AGENT_MODE=.*$/m, `AGENT_MODE=${mode}`);
+  replaceOrAppend(/^AGENT_KEYPAIR=.*$/m, `AGENT_KEYPAIR=${agentKeypair}`);
+  replaceOrAppend(
+    /^# ?ANTHROPIC_API_KEY=.*$/m,
+    `${providerKey === 'ANTHROPIC_API_KEY' ? '' : '# '}ANTHROPIC_API_KEY=${providerKey === 'ANTHROPIC_API_KEY' ? llmKey : ''}`,
+  );
+  replaceOrAppend(
+    /^# ?OPENAI_API_KEY=.*$/m,
+    `${providerKey === 'OPENAI_API_KEY' ? '' : '# '}OPENAI_API_KEY=${providerKey === 'OPENAI_API_KEY' ? llmKey : ''}`,
+  );
+  replaceOrAppend(
+    /^# ?GOOGLE_GENERATIVE_AI_API_KEY=.*$/m,
+    `${providerKey === 'GOOGLE_GENERATIVE_AI_API_KEY' ? '' : '# '}GOOGLE_GENERATIVE_AI_API_KEY=${providerKey === 'GOOGLE_GENERATIVE_AI_API_KEY' ? llmKey : ''}`,
+  );
+  replaceOrAppend(/^WALLET_ALLOWLIST=.*$/m, `WALLET_ALLOWLIST=${walletAllowlist}`);
+  replaceOrAppend(
+    /^# ?BOOTSTRAP_WALLET=.*$/m,
+    bootstrapWallet ? `BOOTSTRAP_WALLET=${bootstrapWallet}` : '# BOOTSTRAP_WALLET=',
+  );
+
+  // LLM_MODEL is optional in the slim example (defaults to Anthropic Claude).
+  // Only write a line when the operator picked a non-default provider.
+  if (llmModel !== 'anthropic/claude-sonnet-4-5-20250929') {
+    if (/^LLM_MODEL=/m.test(envContent)) {
+      envContent = envContent.replace(/^LLM_MODEL=.*$/m, `LLM_MODEL=${llmModel}`);
+    } else {
+      appended.push(`LLM_MODEL=${llmModel}`);
+    }
+  }
+
+  if (appended.length > 0) {
+    if (!envContent.endsWith('\n')) envContent += '\n';
+    envContent += '\n# --- appended by `pnpm setup` (key not found in .env.example) ---\n';
+    envContent += appended.join('\n') + '\n';
   }
 
   writeFileSync(envPath, envContent, { mode: 0o600 });
   console.log(`\n  wrote ${envPath} (chmod 0600)`);
+  if (appended.length > 0) {
+    console.log(`  (${appended.length} key${appended.length === 1 ? '' : 's'} appended because .env.example was missing the placeholder line)`);
+  }
 
   // 6. wallets.allowlist.json
   if (mode === 'public' && walletAllowlist) {
     const allowlistPath = resolve(ROOT, 'wallets.allowlist.json');
-    const seedAllowlist = !existsSync(allowlistPath) || await new Promise<boolean>((res) => res(true));
+    let seedAllowlist = !existsSync(allowlistPath);
+    if (!seedAllowlist) {
+      // File already exists — confirm before clobbering. We've already closed
+      // the readline interface above, so open a fresh one for this prompt.
+      const confirmRl = createInterface({ input, output });
+      const answer = (await confirmRl.question(
+        `  ${allowlistPath} already exists — overwrite with [{ "wallets": ["${walletAllowlist}"] }]? [y/N]: `,
+      )).trim().toLowerCase();
+      confirmRl.close();
+      seedAllowlist = answer === 'y' || answer === 'yes';
+    }
     if (seedAllowlist) {
       writeFileSync(
         allowlistPath,
         JSON.stringify({ wallets: [walletAllowlist] }, null, 2) + '\n',
       );
       console.log(`  wrote ${allowlistPath}`);
+    } else {
+      console.log(`  kept existing ${allowlistPath} unchanged`);
     }
   }
 

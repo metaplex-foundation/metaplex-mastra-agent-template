@@ -480,8 +480,8 @@ All commands are run from the workspace root.
 | Command | Description |
 |---|---|
 | `pnpm dev` | Build deps then start the server in watch mode |
-| `pnpm dev:ui` | Start the test UI on http://localhost:3001 |
-| `pnpm dev:all` | Build deps then start both server and test UI |
+| `pnpm dev:ui` | Start the test UI on http://localhost:3001 (assumes `metaplex-agent-chat-template` is cloned at the sibling path) |
+| `pnpm dev:full` | Build deps then start both server and chat UI together (clones the chat-template sibling on first run) |
 | `pnpm build` | Build all packages (`tsc` in each workspace) |
 | `pnpm typecheck` | Run TypeScript type checking across all packages (no emit) |
 | `pnpm clean` | Remove `dist/` / `.next/` directories from all packages |

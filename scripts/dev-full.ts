@@ -13,8 +13,8 @@
  * Override the upstream URL with CHAT_TEMPLATE_REPO=https://...
  */
 
-import { execSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,11 +37,15 @@ function ensureChatTemplate(): void {
   }
   log(`chat-template missing at ${CHAT_TEMPLATE_DIR}`);
   log(`cloning from ${CHAT_TEMPLATE_REPO} ...`);
-  try {
-    execSync(`git clone --depth 1 ${CHAT_TEMPLATE_REPO} ${CHAT_TEMPLATE_DIR}`, {
-      stdio: 'inherit',
-    });
-  } catch {
+  // spawnSync with array args bypasses the shell — paths and URLs are
+  // passed verbatim, so an operator-supplied CHAT_TEMPLATE_REPO containing
+  // shell metacharacters can't escape into command execution.
+  const clone = spawnSync(
+    'git',
+    ['clone', '--depth', '1', CHAT_TEMPLATE_REPO, CHAT_TEMPLATE_DIR],
+    { stdio: 'inherit' },
+  );
+  if (clone.status !== 0) {
     console.error(
       `[dev:full] clone failed. Either:\n` +
       `  1. Set CHAT_TEMPLATE_DIR to a local checkout you already have, or\n` +
@@ -51,11 +55,21 @@ function ensureChatTemplate(): void {
     process.exit(1);
   }
   log('installing chat-template deps (one-time)...');
-  execSync('pnpm install', { cwd: CHAT_TEMPLATE_DIR, stdio: 'inherit' });
+  const install = spawnSync('pnpm', ['install'], {
+    cwd: CHAT_TEMPLATE_DIR,
+    stdio: 'inherit',
+  });
+  if (install.status !== 0) {
+    console.error('[dev:full] pnpm install failed in chat-template');
+    process.exit(1);
+  }
   if (!existsSync(resolve(CHAT_TEMPLATE_DIR, '.env.local'))) {
     const example = resolve(CHAT_TEMPLATE_DIR, '.env.local.example');
     if (existsSync(example)) {
-      execSync(`cp ${example} ${resolve(CHAT_TEMPLATE_DIR, '.env.local')}`);
+      // copyFileSync avoids the platform-dependent `cp` shell call (Windows
+      // doesn't have it on PATH by default) and removes another shell-
+      // interpolation surface.
+      copyFileSync(example, resolve(CHAT_TEMPLATE_DIR, '.env.local'));
       log('seeded chat-template .env.local from .env.local.example');
     }
   }

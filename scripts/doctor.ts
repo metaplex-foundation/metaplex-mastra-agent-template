@@ -191,13 +191,32 @@ async function checkSiwsSmoke(): Promise<void> {
       const sock = new ws.WebSocket(`ws://localhost:${port}`, {
         origin: cfg.WS_ALLOWED_ORIGINS[0] ?? 'http://localhost:3001',
       });
+      let resolved = false;
+      const finish = (cb: () => void) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        cb();
+      };
       const timer = setTimeout(() => {
         sock.terminate();
-        rejectDone(new Error(`no terminal frame within 5s on ws://localhost:${port}`));
+        finish(() => rejectDone(new Error(`no terminal frame within 5s on ws://localhost:${port}`)));
       }, 5000);
       sock.on('error', (err) => {
-        clearTimeout(timer);
-        rejectDone(err);
+        finish(() => rejectDone(err));
+      });
+      sock.on('close', (code, reason) => {
+        // If the server closes the socket before we observed a terminal
+        // frame (auth_challenge → authenticated/auth_error), surface that
+        // as a warning rather than letting the 5s timer expire silently.
+        finish(() => {
+          add(
+            'SIWS smoke',
+            'warn',
+            `socket closed (code=${code}, reason=${reason.toString() || '(empty)'}) before completing handshake`,
+          );
+          resolveDone();
+        });
       });
       sock.on('message', (raw) => {
         const msg = JSON.parse(raw.toString());
@@ -218,15 +237,17 @@ async function checkSiwsSmoke(): Promise<void> {
             message: m,
           }));
         } else if (msg.type === 'authenticated') {
-          clearTimeout(timer);
-          add('SIWS smoke', 'ok', `auth_challenge → authenticated (authMode=${msg.isOwner ? 'owner' : 'non-owner'} pubkey)`);
-          sock.close(1000, 'doctor');
-          resolveDone();
+          finish(() => {
+            add('SIWS smoke', 'ok', `auth_challenge → authenticated (authMode=${msg.isOwner ? 'owner' : 'non-owner'} pubkey)`);
+            sock.close(1000, 'doctor');
+            resolveDone();
+          });
         } else if (msg.type === 'auth_error') {
-          clearTimeout(timer);
-          add('SIWS smoke', 'warn', `auth_error: ${msg.code} — server is up and SIWS-wired, deny path is correct for a random keypair`);
-          sock.close();
-          resolveDone();
+          finish(() => {
+            add('SIWS smoke', 'warn', `auth_error: ${msg.code} — server is up and SIWS-wired, deny path is correct for a random keypair`);
+            sock.close();
+            resolveDone();
+          });
         }
       });
     });
