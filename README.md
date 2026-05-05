@@ -102,8 +102,10 @@ LLM_MODEL=anthropic/claude-sonnet-4-5-20250929
 ANTHROPIC_API_KEY=sk-ant-...
 SOLANA_RPC_URL=https://api.devnet.solana.com
 AGENT_KEYPAIR=<base58-encoded secret key or JSON byte array>
-WEB_CHANNEL_TOKEN=<generate with: openssl rand -hex 24>
+WALLET_ALLOWLIST=<your wallet pubkey>
 ```
+
+Authentication is wallet-signature-based (Sign-In-With-Solana). The default `AGENT_AUTH_MODE` is auto-resolved from `AGENT_MODE`: autonomous agents resolve to `owner`-only; public agents resolve to `allowlist` if `WALLET_ALLOWLIST` is set and `open` otherwise. Set `WALLET_ALLOWLIST` to your own wallet pubkey for the Quick Start so the local dev UI can connect. See [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md) § Authentication for the full handshake.
 
 `AGENT_KEYPAIR` is required in **both** modes — the agent always needs a keypair to sign registration, delegation, and treasury operations. Generate one with:
 
@@ -126,25 +128,16 @@ The chat UI lives in a sibling repo: [metaplex-agent-chat-template](../metaplex-
 ```bash
 cd ../metaplex-agent-chat-template
 cp .env.local.example .env.local
-# Edit .env.local — NEXT_PUBLIC_WS_TOKEN must match WEB_CHANNEL_TOKEN in the agent's .env
+# Edit .env.local — point NEXT_PUBLIC_WS_HOST at the agent (e.g. localhost:3002).
+# No shared token is needed; the UI signs a SIWS challenge with the connected wallet.
 
 pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3001 to chat with the agent, connect a Solana wallet (Phantom/Solflare), and test transaction signing. Run the agent with `pnpm dev` from this repo in a separate terminal.
+Open http://localhost:3001 to chat with the agent, connect a Solana wallet (Phantom/Solflare), and test transaction signing. Run the agent with `pnpm dev` from this repo in a separate terminal. The wallet you connect must be in `WALLET_ALLOWLIST` (or be the agent's owner) when `AGENT_AUTH_MODE=allowlist`; in `open` mode any wallet that completes the SIWS handshake is accepted.
 
-You can also connect with any WebSocket client:
-
-```bash
-npx wscat -c 'ws://localhost:3002/?token=YOUR_TOKEN_HERE'
-```
-
-Send a test message:
-
-```json
-{"type":"message","content":"What is my SOL balance?","sender_name":"dev"}
-```
+For ad-hoc WebSocket testing without a browser wallet, see the worked SIWS example in [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md) § Authentication — clients must sign a challenge before any chat-plane message is accepted.
 
 ---
 
@@ -211,7 +204,7 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 | Variable | Description |
 |---|---|
 | `AGENT_KEYPAIR` | Base58-encoded secret key (or JSON byte array) for the agent wallet. Required in both modes -- the agent always has a keypair that signs registration, delegation, and treasury operations. |
-| `WEB_CHANNEL_TOKEN` | Shared secret for WebSocket authentication. **Must be at least 32 characters.** Generate with `openssl rand -hex 24` (48 hex chars) or `openssl rand -hex 32` (64 hex chars). |
+| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Required only when `AGENT_AUTH_MODE=allowlist` (and not provided via the `wallets.allowlist.json` file). The owner is always allowed regardless. |
 | LLM API Key | One of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, matching the provider prefix in `LLM_MODEL`. |
 
 ### Optional (with defaults)
@@ -219,6 +212,12 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 | Variable | Default | Description |
 |---|---|---|
 | `AGENT_MODE` | `public` | `"public"` or `"autonomous"` |
+| `AGENT_AUTH_MODE` | auto-resolved | SIWS auth tier: `owner`, `allowlist`, or `open`. Auto-resolves to `owner` for autonomous, `allowlist` for public when `WALLET_ALLOWLIST` is set, otherwise `open`. |
+| `AUTH_NONCE_TTL_MS` | `60000` | How long an issued SIWS nonce stays valid before the client must respond. |
+| `AUTH_HANDSHAKE_TIMEOUT_MS` | `30000` | Hard timeout for the full handshake before the server closes the socket. |
+| `WALLET_RATE_LIMIT_MAX` | `60` | Per-wallet sliding-window cap on post-auth chat messages. |
+| `WALLET_RATE_LIMIT_WINDOW_MS` | `60000` | Sliding window length for the per-wallet limiter. |
+| `WALLET_RATE_LIMIT_MAX_KEYS` | `10000` | LRU cap on tracked wallets in the per-wallet limiter. |
 | `LLM_MODEL` | `anthropic/claude-sonnet-4-5-20250929` | Mastra model identifier (`provider/model-id`) |
 | `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana JSON-RPC endpoint |
 | `WEB_CHANNEL_PORT` | `3002` | WebSocket server port |
@@ -239,6 +238,8 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 
 | Variable | Description |
 |---|---|
+| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Merged (deduped) with the contents of `wallets.allowlist.json` if that file exists. Required when `AGENT_AUTH_MODE=allowlist` (unless the file is populated instead). |
+| `WALLET_ALLOWLIST_PATH` | Override the path of the allowlist file (default: `wallets.allowlist.json` at the workspace root). The file is hot-reloaded every 5s by mtime polling. |
 | `BOOTSTRAP_WALLET` | Base58 pubkey of the wallet allowed to bootstrap the agent. Required for autonomous mode pre-registration (server refuses to start without it). Once the agent is registered on-chain, the asset owner takes precedence and this value is no longer consulted. |
 | `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted to `agent-state.json` otherwise) |
 | `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
@@ -260,7 +261,7 @@ Set the corresponding API key environment variable for whichever provider you ch
 
 ### UI Environment
 
-The chat UI lives in [metaplex-agent-chat-template](../metaplex-agent-chat-template). See its `.env.local.example` and README for `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` configuration. The only contract this repo cares about: `NEXT_PUBLIC_WS_TOKEN` in the UI must match `WEB_CHANNEL_TOKEN` here.
+The chat UI lives in [metaplex-agent-chat-template](../metaplex-agent-chat-template). See its `.env.local.example` and README for `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` configuration. The UI authenticates via the SIWS handshake using the connected browser wallet — there is no shared token to mirror. The only cross-repo contract is that the UI's `NEXT_PUBLIC_WS_HOST` points at the agent and the connecting wallet is allowed by the agent's `AGENT_AUTH_MODE` tier.
 
 ---
 
@@ -455,7 +456,7 @@ execute: async ({ destination, amount }, { requestContext }) => {
 };
 ```
 
-See [`docs/SPEC.md`](./docs/SPEC.md) Appendix B for the canonical `AgentContext` shape and §5.2 for the `ToolResult<T>` convention.
+See [`docs/SPEC.md`](./docs/SPEC.md) Appendix B for the canonical `AgentContext` shape and §5.3 for the `ToolResult<T>` convention.
 
 ---
 
@@ -508,9 +509,8 @@ The WebSocket server implements the **PlexChat** protocol for bidirectional comm
 
 | Type | Purpose |
 |---|---|
-| `message` | Send a chat message to the agent |
-| `wallet_connect` | Notify the server of a connected Solana wallet address |
-| `wallet_disconnect` | Clear the connected wallet |
+| `auth_response` | Complete the SIWS handshake (publicKey + signature + signed message) |
+| `message` | Send a chat message to the agent (post-auth only) |
 | `tx_result` | Report a signed and submitted transaction (requires `correlationId` + `signature`) |
 | `tx_error` | Report a rejected or failed transaction (requires `correlationId`, optional `reason`) |
 
@@ -521,18 +521,19 @@ All server-to-client messages are unicast to the originating session — no cros
 | Type | Purpose |
 |---|---|
 | `connected` | Sent on successful WebSocket connection |
+| `auth_challenge` | SIWS nonce + canonical-message metadata for the client to sign |
+| `authenticated` | SIWS handshake succeeded; chat plane opens. Includes `walletAddress` and `isOwner`. |
+| `auth_error` | SIWS handshake failed; followed by `ws.close(4001, code)` |
 | `message` | Agent chat response |
 | `typing` | Typing indicator on/off |
 | `transaction` | Serialized Solana transaction for wallet signing (includes `correlationId`; includes `feeSol` in public mode when a fee is prepended) |
-| `wallet_connected` | Wallet connection confirmed |
-| `wallet_disconnected` | Wallet disconnection confirmed |
 | `error` | Error response |
 
 ### Authentication
 
-Connections require a token via query parameter (`?token=...`) or `Authorization: Bearer ...` header. Unauthorized connections are closed with code `4001`.
+Connections authenticate via a Sign-In-With-Solana (SIWS) handshake. The client opens a plain WebSocket, receives an `auth_challenge` with a single-use nonce, signs the canonical message with the user's Solana wallet, and sends `auth_response`. The server verifies the Ed25519 signature and checks the wallet against the configured `AGENT_AUTH_MODE` tier (`owner` / `allowlist` / `open`). On success the wallet is bound to the session; on failure the connection is closed with code `4001`.
 
-For the complete protocol specification including message schemas, multi-transaction flows, state management, and example code, see [WEBSOCKET_PROTOCOL.md](./WEBSOCKET_PROTOCOL.md).
+For the complete protocol specification — message schemas, the SIWS canonical message, error codes, multi-transaction flows, state management, and a worked example — see [WEBSOCKET_PROTOCOL.md](./WEBSOCKET_PROTOCOL.md).
 
 ---
 
@@ -588,13 +589,25 @@ location /ws {
 
 ### Authentication
 
-The current auth model is a single shared token (`WEB_CHANNEL_TOKEN`, minimum 32 chars). For production:
+The auth model is Sign-In-With-Solana (SIWS) — every WebSocket connection completes a wallet-signature handshake before any chat-plane traffic is accepted. There are three tiers, controlled by `AGENT_AUTH_MODE`:
 
-- **Prefer subprotocol or Authorization-header auth** over the query param. Browser clients should open the WebSocket with `new WebSocket(url, ['bearer', token])` so the token travels in the handshake and never appears in reverse-proxy access logs, browser history, or Referer headers. See [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md) § Authentication.
-- **Terminate TLS** (`wss://`) at a reverse proxy -- the handshake, including the subprotocol header, is only encrypted on the wire if the transport is encrypted.
-- **Use tokens ≥ 32 characters** (preferably a per-user JWT or session cookie tied to your app's auth system, not a single shared secret for all clients).
+| Tier | Default for | Allowed wallets |
+|---|---|---|
+| `owner` | autonomous mode | The on-chain agent asset owner only. |
+| `allowlist` | public mode when `WALLET_ALLOWLIST` is set | Owner ∪ wallets in `wallets.allowlist.json` ∪ `WALLET_ALLOWLIST` env. |
+| `open` | public mode when no allowlist is configured | Any wallet that completes a valid SIWS signature. |
+
+The owner is **always** authorized regardless of tier.
+
+For production:
+
+- **Terminate TLS** (`wss://`) at a reverse proxy. The SIWS handshake itself is replay-protected, but transport encryption still matters for `auth_response` confidentiality and for protecting chat content.
+- **Pick the tightest tier that fits.** `owner` for headless autonomous deployments; `allowlist` for invite-only public deployments; `open` only for genuinely public agents (and rely on per-wallet rate limits + LLM cost budgets).
+- **Populate the allowlist via either source.** `wallets.allowlist.json` at the workspace root (hot-reloaded every 5s, gitignored) is the primary mechanism; `WALLET_ALLOWLIST=pk1,pk2,...` is the env-var fallback for cloud deploys without writable filesystems. The two are merged and deduped if both are present.
 - **Constrain `WS_ALLOWED_ORIGINS`** to exactly the origins allowed to open a WebSocket. Cross-site requests are rejected during the handshake.
-- The server applies per-session rate limits internally; put an application-layer gateway (Cloudflare, nginx limits, etc.) in front to also cap handshake attempts by IP.
+- The server applies a per-wallet sliding-window rate limit on chat messages (`WALLET_RATE_LIMIT_MAX` / `WALLET_RATE_LIMIT_WINDOW_MS`) in addition to the per-session limiter; put an application-layer gateway (Cloudflare, nginx limits, etc.) in front to also cap handshake attempts by IP.
+
+See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) § "Auth tiers" for production recipes per tier and [`WEBSOCKET_PROTOCOL.md`](./WEBSOCKET_PROTOCOL.md) § Authentication for the wire-level handshake.
 
 ### RPC endpoint
 

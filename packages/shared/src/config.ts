@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { z } from 'zod';
 import bs58 from 'bs58';
 import { getState } from './state.js';
+import { AllowlistFile } from './allowlist-file.js';
 
 // Load .env from workspace root — walk up from cwd until we find it
 function findEnvFile(from: string): string {
@@ -25,9 +26,14 @@ config({ path: findEnvFile(process.cwd()) });
 // ---------------------------------------------------------------------------
 // Core:
 //   AGENT_MODE, LLM_MODEL, SOLANA_RPC_URL, AGENT_KEYPAIR,
-//   WEB_CHANNEL_PORT, WEB_CHANNEL_TOKEN, ASSISTANT_NAME, JUPITER_API_KEY,
+//   WEB_CHANNEL_PORT, ASSISTANT_NAME, JUPITER_API_KEY,
 //   AGENT_FEE_SOL, TOKEN_OVERRIDE, BOOTSTRAP_WALLET,
 //   AGENT_ASSET_ADDRESS, AGENT_TOKEN_MINT
+// WebSocket auth (SIWS):
+//   AGENT_AUTH_MODE        — 'owner' | 'allowlist' | 'open' (auto-resolved)
+//   WALLET_ALLOWLIST       — comma-separated base58 pubkeys
+//   AUTH_NONCE_TTL_MS      — SIWS nonce TTL (default 60000)
+//   AUTH_HANDSHAKE_TIMEOUT_MS — handshake hard timeout (default 30000)
 // Tuning:
 //   MAX_STEPS, ENABLE_DEBUG_EVENTS, MAX_CONNECTIONS
 // Security hardening:
@@ -38,6 +44,9 @@ config({ path: findEnvFile(process.cwd()) });
 //   MAX_MESSAGE_CONTENT    — per-message content byte cap (M3, default 8000)
 //   MAX_RPC_TIME_BUDGET_MS — per-turn wall-clock budget (M5, default 60000)
 //   LOG_AUTH_FAILURES      — log token/origin/owner/rate-limit denials (L6, default true)
+//   WALLET_RATE_LIMIT_MAX  — per-wallet sliding-window event cap (default 60)
+//   WALLET_RATE_LIMIT_WINDOW_MS — per-wallet rate-limit window length (default 60000)
+//   WALLET_RATE_LIMIT_MAX_KEYS — LRU cap on tracked wallets (default 10000)
 // LLM API keys (at least one must match the LLM_MODEL provider prefix):
 //   ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY
 // ---------------------------------------------------------------------------
@@ -110,11 +119,34 @@ const agentKeypairSchema = z
     }
   }, 'AGENT_KEYPAIR must be a 64-byte base58 secret key or JSON byte array');
 
-let _weakTokenWarned = false;
-
-const webChannelTokenSchema = z
+/**
+ * WALLET_ALLOWLIST — comma-separated base58 pubkeys allowed to connect when
+ * `AGENT_AUTH_MODE=allowlist`. Empty / whitespace entries are dropped so a
+ * trailing comma or accidentally-blank `WALLET_ALLOWLIST=` is harmless. The
+ * resolved value is `string[]`, not `string`, so downstream code can iterate
+ * without re-parsing.
+ *
+ * Note: this schema does NOT base58-validate entries — that's done at use-site
+ * (allowlist resolver) so a single typo in the env doesn't bring the server
+ * down on boot. Invalid entries simply never match an incoming public key.
+ */
+const walletAllowlistSchema = z
   .string()
-  .min(32, 'WEB_CHANNEL_TOKEN must be at least 32 characters; use `openssl rand -hex 24` to generate a strong token');
+  .default('')
+  .transform((raw) =>
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+
+/**
+ * AGENT_AUTH_MODE — explicit override of the auth tier policy. When unset, the
+ * mode is auto-resolved from AGENT_MODE + WALLET_ALLOWLIST in `getConfig()`:
+ *   - autonomous → 'owner'
+ *   - public     → 'allowlist' if WALLET_ALLOWLIST has entries, else 'open'
+ */
+const authModeSchema = z.enum(['owner', 'allowlist', 'open']).optional();
 
 /**
  * WS_ALLOWED_ORIGINS — comma-separated list of allowed Origin header values.
@@ -135,6 +167,14 @@ const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
+  /**
+   * Explicit network identifier for the SIWS auth_challenge. Optional —
+   * when unset, the network is inferred from SOLANA_RPC_URL via substring
+   * match on `devnet`. Set explicitly when using a custom RPC endpoint
+   * whose hostname does not contain "devnet" / "mainnet" (e.g. private
+   * RPC providers or testnet).
+   */
+  SOLANA_NETWORK: z.enum(['solana-mainnet', 'solana-devnet']).optional(),
   AGENT_KEYPAIR: agentKeypairSchema,
   WEB_CHANNEL_PORT: z.preprocess(
     // Fall back to PORT (injected by Railway, Render, Fly, Heroku, etc.) when
@@ -142,7 +182,21 @@ const envSchema = z.object({
     (v) => (v === undefined || v === '' ? process.env.PORT : v),
     z.coerce.number().default(3002),
   ),
-  WEB_CHANNEL_TOKEN: webChannelTokenSchema,
+  // --- WebSocket auth (SIWS) ---
+  /** Tier policy: 'owner' | 'allowlist' | 'open'. Auto-resolved if unset. */
+  AGENT_AUTH_MODE: authModeSchema,
+  /** Comma-separated base58 pubkeys allowed in 'allowlist' tier. */
+  WALLET_ALLOWLIST: walletAllowlistSchema,
+  /**
+   * Path to the JSON allowlist file (`{ "wallets": string[] }`). Resolved
+   * relative to the server's `process.cwd()` when not absolute. Default
+   * matches the workspace-root convention used by `agent-state.json`.
+   */
+  WALLET_ALLOWLIST_PATH: z.string().min(1).default('wallets.allowlist.json'),
+  /** TTL of issued SIWS handshake nonces, in ms. */
+  AUTH_NONCE_TTL_MS: z.coerce.number().int().min(5_000).max(600_000).default(60_000),
+  /** Hard cap on how long the server waits for a SIWS handshake to complete. */
+  AUTH_HANDSHAKE_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
   ASSISTANT_NAME: z.string().default('Agent'),
   JUPITER_API_KEY: optional(z.string().min(1)),
   AGENT_FEE_SOL: z.coerce.number().min(0).max(1).default(0.001),
@@ -171,6 +225,12 @@ const envSchema = z.object({
     (v) => v === undefined ? true : v === 'true' || v === '1',
     z.boolean().default(true),
   ),
+  /** Per-wallet rate limit: max messages per WALLET_RATE_LIMIT_WINDOW_MS, aggregated across that wallet's concurrent sessions. */
+  WALLET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  /** Sliding-window length for the per-wallet rate limit, in ms. */
+  WALLET_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+  /** LRU cap on tracked wallets in the per-wallet rate limiter. */
+  WALLET_RATE_LIMIT_MAX_KEYS: z.coerce.number().int().min(100).default(10_000),
   // --- Autonomous-mode worker loop ---
   /** Sleep between ticks, in ms. Tick body runs to completion before sleeping. (autonomous mode only) */
   TICK_INTERVAL_MS: z.coerce.number().int().min(100).default(300000),
@@ -243,12 +303,25 @@ export function getConfig(): EnvConfig {
     // LLM provider key presence check
     validateLlmApiKey(_config);
 
-    // Soft warning for weak but valid-length tokens
-    if (!_weakTokenWarned && _config.WEB_CHANNEL_TOKEN.length < 32) {
-      console.warn(
-        'WEB_CHANNEL_TOKEN is weak (< 32 chars); use `openssl rand -hex 24` for production',
-      );
-      _weakTokenWarned = true;
+    // Resolve AGENT_AUTH_MODE if not explicitly set:
+    //   autonomous → owner (only the on-chain owner can drive the agent)
+    //   public + any allowlist entries (file ∪ env) → allowlist
+    //   public + no allowlist → open (any SIWS-verified wallet)
+    //
+    // The file source is consulted via a one-shot AllowlistFile read (no
+    // polling) so an operator who populates wallets.allowlist.json without
+    // also setting WALLET_ALLOWLIST still gets the 'allowlist' default.
+    if (!_config.AGENT_AUTH_MODE) {
+      if (_config.AGENT_MODE === 'autonomous') {
+        _config.AGENT_AUTH_MODE = 'owner';
+      } else {
+        const merged = new AllowlistFile({
+          path: _config.WALLET_ALLOWLIST_PATH,
+          envFallback: _config.WALLET_ALLOWLIST,
+          // pollIntervalMs omitted — one-shot read, no setInterval started.
+        }).current();
+        _config.AGENT_AUTH_MODE = merged.length > 0 ? 'allowlist' : 'open';
+      }
     }
 
     const state = getState();

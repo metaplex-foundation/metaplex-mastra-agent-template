@@ -1,7 +1,7 @@
 # Metaplex Agent Template - Product Requirements Document
 
-**Version:** 1.2
-**Last Updated:** 2026-04-24
+**Version:** 1.3
+**Last Updated:** 2026-05-04
 **Status:** Living Document
 
 This document is the canonical spec: it should contain enough detail to reconstruct equivalent working code from scratch. When implementation and spec disagree, treat the repository as source of truth and patch this document.
@@ -126,7 +126,7 @@ The template supports two operating modes, controlled by the `AGENT_MODE` enviro
 
 **Behavior:**
 - **Worker loop** wakes up every `TICK_INTERVAL_MS`, reads goals + tasks + recent journal from `agent-state.json`, and decides whether to act. Each tick is a fresh `agent.generate()` call — long-term memory lives in state, not in a rolling LLM context.
-- **Only the asset owner can interact via WebSocket.** All other connections are rejected at the WebSocket layer before the LLM is ever invoked (see §3.4 Owner Resolution, §5.3 Tool Authorization).
+- **Owner-only auth.** Autonomous mode auto-resolves `AGENT_AUTH_MODE=owner`, so only the on-chain agent asset owner can complete the SIWS handshake. Owner enforcement happens at SIWS auth time (§5.1), not via a per-message gate inside `PlexChatServer`.
 - The owner-gated WS becomes the **configuration interface**: brief goals via chat, inspect state in the debug panel, pause via chat. No env-var prompt engineering, no redeploy to change strategy.
 - Agent signs and submits all transactions itself using its keypair.
 - No fee prepending (agent self-funds).
@@ -209,9 +209,84 @@ Tools automatically write to `agent-state.json` after key operations (`register-
 
 ---
 
-## 5. Tools
+## 5. Authorization & Tools
 
-### 5.1 Tool Inventory
+### 5.1 Authentication (Sign-In-With-Solana)
+
+**Status (v1.3, 2026-05-04):** the legacy `WEB_CHANNEL_TOKEN` shared secret was removed. Authentication is wallet-signature-based.
+
+#### Wire-level handshake
+
+Every WebSocket connection completes a Sign-In-With-Solana (SIWS) handshake before any chat-plane traffic is accepted:
+
+1. Client opens `ws://host:port/`. Origin is validated against `WS_ALLOWED_ORIGINS`. The query param `?token=`, the `Sec-WebSocket-Protocol: bearer, …` subprotocol, and the `Authorization: Bearer …` header are **rejected**.
+2. Server sends `connected` (per-session `jid`) followed by `auth_challenge` containing a single-use nonce, `agentName`, `agentAsset` (or `null` if unregistered), `network`, `authMode`, `issuedAt`, `expiresAt`.
+3. Client constructs the canonical SIWS message (verbatim, byte-for-byte), has the user's Solana wallet sign its UTF-8 bytes, and replies with `auth_response` (`publicKey`, `signature`, `message`).
+4. Server verifies — fail-fast in this order:
+   1. nonce exists in store and not expired → else `nonce_invalid` / `nonce_expired`
+   2. `message` contains the issued nonce → else `message_mismatch`
+   3. Ed25519 signature verifies → else `signature_invalid`
+   4. `publicKey` allowed by current tier → else `not_authorized`
+5. On success: nonce is consumed (single-use), `walletAddress = publicKey`, `isOwnerVerified = (publicKey === ownerWallet)`, server emits `authenticated`.
+6. On failure: server emits `auth_error` with the failure code and closes the socket with code `4001`.
+
+The full handshake state machine (including timeout transitions) is diagrammed in §6.2. Wire schemas for `auth_challenge`, `auth_response`, `authenticated`, and `auth_error` are specified in [`WEBSOCKET_PROTOCOL.md`](../WEBSOCKET_PROTOCOL.md) §§ 1–4 of "Server → Client Messages" / "Client → Server Messages".
+
+#### Canonical SIWS message
+
+The client signs **exactly** these bytes, derived from `auth_challenge`:
+
+```
+Sign in to {agentName}
+
+Agent: {agentAsset || 'unregistered'}
+Network: {network}
+Nonce: {nonce}
+Issued: {issuedAt}
+Expires: {expiresAt}
+```
+
+**Server enforcement.** The challenge fields emitted to a session are snapshotted on the per-session state (`pendingChallenge: SiwsParams`). On `auth_response` the server rebuilds the canonical string via `buildSiwsMessage(pendingChallenge)` and compares it byte-for-byte against `msg.message` before signature verification — any mismatch (asset, network, whitespace, field substitution) yields `message_mismatch`. This binds each signature to the exact agent and network the wallet displayed in its signing prompt, giving strict cross-agent / cross-chain replay protection on top of the single-use nonce + TTL defenses.
+
+#### Authorization tiers
+
+`AGENT_AUTH_MODE` selects which wallets are allowed to authenticate. When unset, the mode is auto-resolved from `AGENT_MODE`:
+
+| Tier | Default for | Allowed wallets | Operator config |
+|---|---|---|---|
+| `owner` | `AGENT_MODE=autonomous` | On-chain agent asset owner only (resolved from `AGENT_ASSET_ADDRESS` or `BOOTSTRAP_WALLET` pre-registration). | nothing — owner is auto-resolved (§3.4) |
+| `allowlist` | `AGENT_MODE=public` if `WALLET_ALLOWLIST` is non-empty | Owner ∪ wallets in `wallets.allowlist.json` (file) ∪ `WALLET_ALLOWLIST` env. | populate either source; both can coexist |
+| `open` | `AGENT_MODE=public` if no allowlist is configured | Any wallet that completes a valid SIWS signature. | rely on per-wallet rate limits |
+
+The owner is **always** authorized regardless of tier — there is no need to list yourself. `isOwner: true` is reported in `authenticated` and is consumed by `withAuth(tool, 'owner')` for owner-gated tools (§5.5).
+
+#### Allowlist sources
+
+Two sources, merged and deduplicated:
+
+1. **File (primary):** `wallets.allowlist.json` at the workspace root with shape `{ "wallets": ["pk1", "pk2", ...] }`. Path is overridable via `WALLET_ALLOWLIST_PATH`. Hot-reloaded every 5s via mtime polling — no restart needed when an operator adds/removes a wallet. Malformed JSON is logged but the previous good list is retained. The file is gitignored; the template ships `wallets.allowlist.example.json`.
+2. **Env (fallback):** `WALLET_ALLOWLIST=pk1,pk2,...` for cloud deploys without writable filesystems. Empty entries are dropped (trailing commas are harmless).
+
+#### Tunable env vars
+
+| Var | Default | Notes |
+|---|---|---|
+| `AGENT_AUTH_MODE` | auto-resolved | `owner` / `allowlist` / `open` — explicit override of the auto-default |
+| `WALLET_ALLOWLIST` | (empty) | comma-separated base58 pubkeys |
+| `WALLET_ALLOWLIST_PATH` | `wallets.allowlist.json` (workspace root) | override the file path |
+| `AUTH_NONCE_TTL_MS` | `60000` | how long an issued nonce is valid |
+| `AUTH_HANDSHAKE_TIMEOUT_MS` | `30000` | how long to wait for `auth_response` before closing |
+| `WALLET_RATE_LIMIT_MAX` | `60` | per-wallet sliding-window cap on post-auth chat messages |
+| `WALLET_RATE_LIMIT_WINDOW_MS` | `60000` | sliding window length for the per-wallet limiter |
+| `WALLET_RATE_LIMIT_MAX_KEYS` | `10000` | LRU cap on tracked wallets |
+
+The per-wallet rate limit is independent of the per-session limit (§6.7) and is keyed on `walletAddress` so a single wallet that opens multiple concurrent sessions cannot escape the cap. Hitting it emits `error` with `code: "RATE_LIMIT"` but does not close the socket.
+
+#### Migration note (1.2 → 1.3)
+
+`WEB_CHANNEL_TOKEN` is no longer accepted. Operators must remove it from `.env` and configure `AGENT_AUTH_MODE` (or rely on the auto-default) plus `WALLET_ALLOWLIST` if they want a tier tighter than `open`. The per-mode "autonomous owner gate" inside `PlexChatServer` was removed — owner enforcement now happens at SIWS auth time via `AGENT_AUTH_MODE=owner`, which is autonomous mode's default.
+
+### 5.2 Tool Inventory
 
 All tools are defined with Mastra's `createTool()` pattern using Zod schemas for input/output validation.
 
@@ -246,7 +321,7 @@ All tools are defined with Mastra's `createTool()` pattern using Zod schemas for
 
 [^agent-signed]: Agent-signed in both modes; requires `confirmIrreversible: true` input for safety. See §6.6 and §10.5.
 
-### 5.2 Adding New Tools
+### 5.3 Adding New Tools
 
 1. Create a `.ts` file in `packages/core/src/tools/shared/` (or `public/`)
 2. Define the tool with `createTool()` from `@mastra/core/tools`
@@ -263,7 +338,7 @@ For consistent tool output shape, use the `ok()`, `info()`, and `err()` helpers 
 
 This gives the LLM a reliable `status` field to branch on and makes error handling uniform across tools.
 
-Wire tools into the registry with `withAuth(tool, level)` so the auth layer fires before `execute` (see §5.4). The canonical per-tool mapping:
+Wire tools into the registry with `withAuth(tool, level)` so the auth layer fires before `execute` (see §5.5). The canonical per-tool mapping:
 
 ```typescript
 // packages/core/src/tools/shared/index.ts
@@ -298,7 +373,7 @@ export const publicToolNames     = Object.keys(publicAgentTools);
 export const autonomousToolNames = Object.keys(autonomousAgentTools);
 ```
 
-### 5.3 Tool Error Codes
+### 5.4 Tool Error Codes
 
 The template ships two overlapping error-code sets. Implementations should import from whichever is closer to their call site:
 
@@ -326,7 +401,7 @@ The template ships two overlapping error-code sets. Implementations should impor
 
 Raw errors are always `console.error`'d server-side; only the taxonomy code + a short, LLM-safe message are returned to the model.
 
-### 5.4 Tool Authorization
+### 5.5 Tool Authorization
 
 Tool authorization is enforced **programmatically** at the tool execution layer -- not via the system prompt. This ensures that prompt injection and social engineering cannot bypass access controls.
 
@@ -368,9 +443,10 @@ Developers can replace the policy entirely to implement custom authorization log
 Authorization operates at three independent layers. Any single layer is sufficient to block unauthorized access:
 
 ```
-Layer 1: Connection Gate (PlexChatServer)
-  └─ Autonomous mode: only owner wallet can interact at all
-  └─ Public mode: open (anyone can connect)
+Layer 1: SIWS Auth Gate (PlexChatServer, see §5.1 / §6.2)
+  └─ AGENT_AUTH_MODE=owner:     only the on-chain asset owner authenticates
+  └─ AGENT_AUTH_MODE=allowlist: owner ∪ explicit list authenticate
+  └─ AGENT_AUTH_MODE=open:      any wallet that signs the SIWS challenge
 
 Layer 2: Tool Auth Policy (tool execution wrapper)
   └─ Checks tool's auth level against the authorization policy
@@ -381,7 +457,7 @@ Layer 3: Transaction Routing (submitOrSend)
   └─ Autonomous mode: agent signs (protected by layers 1 and 2)
 ```
 
-In autonomous mode, Layer 1 (connection gate) prevents the LLM from ever being invoked by a non-owner. Layer 2 (tool auth) serves as defense-in-depth. In public mode, Layer 1 is open, so Layer 2 is the primary enforcement point for `owner`-level tools.
+Autonomous mode auto-resolves `AGENT_AUTH_MODE=owner`, so Layer 1 prevents the LLM from ever being invoked by a non-owner — there is no separate "autonomous-mode owner gate" inside `PlexChatServer`; owner enforcement happens at SIWS auth time, not per-message. Layer 2 (tool auth) serves as defense-in-depth. In public mode under `allowlist` or `open`, Layer 1 admits non-owner wallets and Layer 2 is the primary enforcement point for `owner`-level tools.
 
 ---
 
@@ -391,30 +467,85 @@ In autonomous mode, Layer 1 (connection gate) prevents the LLM from ever being i
 
 The server exposes a WebSocket endpoint implementing the PlexChat protocol for bidirectional, real-time communication between frontends and the agent.
 
-**Endpoint:** `ws://<host>:<port>/?token=<auth-token>`
+**Endpoint:** `ws://<host>:<port>/`
 **Default port:** 3002
 
-### 6.2 Authentication
+The client opens a plain WebSocket — no `?token=` query param, no `Sec-WebSocket-Protocol: bearer` subprotocol, no `Authorization: Bearer` header. Authentication is performed exclusively via the in-band SIWS handshake described in §5.1. Origin is still validated against `WS_ALLOWED_ORIGINS` at the handshake layer (§6.8).
 
-Three methods supported (the server accepts any of them; the client picks one):
+### 6.2 Authentication (Sign-In-With-Solana)
 
-- **WebSocket subprotocol** (recommended for production): send `Sec-WebSocket-Protocol: bearer, <token>` in the handshake (in-browser: `new WebSocket(url, ['bearer', token])`). The server validates the second subprotocol entry and echoes `bearer` back on accept. Unlike the query param, the token is not recorded in URL access logs, browser history, or Referer headers.
-- **Authorization header:** `Authorization: Bearer <token>` (works for non-browser WS clients that can set custom headers).
-- **Query parameter** (convenience for local dev and CLI tools like `wscat`): `?token=<value>`. Discouraged in production because the token leaks through logs, history, and Referer.
+Authentication is wallet-signature-based. Every connection completes a Sign-In-With-Solana (SIWS) handshake before any chat-plane traffic is accepted. There is no shared `WEB_CHANNEL_TOKEN`; the wallet that signs the SIWS challenge becomes the session's `walletAddress` and there is no way for a client to assert a different wallet later.
 
-`WEB_CHANNEL_TOKEN` must be at least 32 characters. Unauthorized connections receive close code `4001` with reason `"Unauthorized"`. Exceeding `MAX_CONNECTIONS` closes with `4002` `"Too many connections"`. Server shutdown closes with `1001` `"Server shutting down"`.
+**Handshake state machine:**
+
+```
+                       socket opened
+                            │
+                  origin validated by verifyClient
+                            │
+                            ▼
+                   ┌──────────────────┐
+                   │  unauthenticated │ ◄─── chat-plane messages rejected
+                   └──────────────────┘
+                            │
+                  server → connected
+                  server → auth_challenge (nonce, canonical-msg metadata)
+                            │
+                            ├── AUTH_NONCE_TTL_MS elapses
+                            │     ──► auth_error: nonce_expired
+                            │     ──► ws.close(4001, "nonce_expired")
+                            │
+                            ├── AUTH_HANDSHAKE_TIMEOUT_MS elapses with
+                            │   no auth_response received
+                            │     ──► auth_error: auth_timeout
+                            │     ──► ws.close(4001, "auth_timeout")
+                            │
+                  client → auth_response (publicKey, signature, message)
+                            │
+                            ▼
+                  server verifies, in order:
+                    1. nonce in store, not expired   else: nonce_invalid
+                    2. message contains nonce        else: message_mismatch
+                    3. ed25519(message, sig, pk) ok  else: signature_invalid
+                    4. publicKey allowed by tier     else: not_authorized
+                            │
+                  ┌─────────┴─────────┐
+                  │                   │
+              verify ok            verify fail
+                  │                   │
+                  ▼                   ▼
+         consume nonce         auth_error: <code>
+         walletAddress = pk    ws.close(4001, code)
+         isOwnerVerified = (pk === ownerWallet)
+                  │
+         server → authenticated
+                  │
+                  ▼
+                   ┌──────────────────┐
+                   │   authenticated  │ ◄─── chat plane open
+                   └──────────────────┘
+```
+
+The full auth model — tiers, allowlist sources, tunable env vars — is specified in §5.1.
+
+Operational close codes:
+
+- `4001` — auth failure (close reason is the `auth_error` code: `nonce_expired` / `nonce_invalid` / `message_mismatch` / `signature_invalid` / `not_authorized` / `auth_timeout`).
+- `4002` — `MAX_CONNECTIONS` exceeded.
+- `1001` — server shutdown.
 
 **Prompt-injection mitigations.** Every user turn is wrapped by the server as `[Agent: registered | Asset: X | User wallet: Y] <content>`. The status label, wallet address, and content are stripped of `\r\n[]` before interpolation so a crafted wallet or message cannot close the bracket and inject a fake system directive. Content length is further capped by `MAX_MESSAGE_CONTENT` (default 8000 chars).
 
 ### 6.3 Client -> Server Messages
 
-| Type | Purpose | Key Fields |
-|---|---|---|
-| `message` | Send chat message to agent | `content` (required), `sender_name` (optional) |
-| `wallet_connect` | Notify server of connected wallet; triggers owner verification in autonomous mode | `address` (required, base58 pubkey) |
-| `wallet_disconnect` | Clear connected wallet | (no fields) |
-| `tx_result` | Report signed and submitted transaction signature | `correlationId` (required), `signature` (required) |
-| `tx_error` | Report failed/rejected transaction | `correlationId` (required), `reason` (optional) |
+| Type | Allowed before auth? | Purpose | Key Fields |
+|---|---|---|---|
+| `auth_response` | Yes (required) | Complete the SIWS handshake | `publicKey`, `signature`, `message` (all required) |
+| `message` | No | Send chat message to agent | `content` (required), `sender_name` (optional) |
+| `tx_result` | No | Report signed and submitted transaction signature | `correlationId` (required), `signature` (required) |
+| `tx_error` | No | Report failed/rejected transaction | `correlationId` (required), `reason` (optional) |
+
+`wallet_connect` / `wallet_disconnect` were removed in protocol v2.0 — the wallet is bound to the session by the SIWS handshake at auth time and cannot change without reconnecting.
 
 ### 6.4 Server -> Client Messages
 
@@ -422,14 +553,17 @@ All server -> client messages are unicast to the originating session. There is n
 
 | Type | Delivery | Purpose |
 |---|---|---|
-| `connected` | Unicast | Connection acknowledged, includes `jid` |
+| `connected` | Unicast | Connection acknowledged, includes `jid`. Sent once, before `auth_challenge`. |
+| `auth_challenge` | Unicast | SIWS nonce + canonical-message metadata (`agentName`, `agentAsset`, `network`, `authMode`, `issuedAt`, `expiresAt`). Sent immediately after `connected`. |
+| `authenticated` | Unicast | SIWS verification succeeded; chat plane opens. Includes `walletAddress`, `isOwner`, `sessionId`. |
+| `auth_error` | Unicast | SIWS verification failed; followed by `ws.close(4001, code)`. |
 | `message` | Unicast | Agent chat response (may contain markdown) |
 | `typing` | Unicast | Agent processing indicator (`isTyping: true/false`) |
 | `transaction` | Unicast | Base64-encoded Solana tx for wallet signing. `correlationId` is always set; `feeSol` is included in public mode when the agent fee is prepended. |
-| `wallet_connected` | Unicast | Confirms wallet connection with `address` |
-| `wallet_disconnected` | Unicast | Confirms wallet disconnection |
 | `error` | Unicast | Error for invalid client messages |
 | `debug:*` | Unicast | Real-time execution telemetry for this session (see 6.5) |
+
+`wallet_connected` / `wallet_disconnected` were removed in protocol v2.0. The session's wallet is reported once via `authenticated` and never changes.
 
 ### 6.5 Debug Events
 
@@ -514,8 +648,8 @@ Transport-level defence:
 
 - `WebSocketServer.maxPayload = 64 * 1024` — caps inbound frames at 64 KB.
 - `verifyClient` rejects browser origins not in `WS_ALLOWED_ORIGINS` (undefined origins — curl, wscat, native — are accepted but logged).
-- `handleProtocols` echoes the `bearer` subprotocol back when present so handshakes with `['bearer', '<token>']` succeed.
-- Token comparison uses `crypto.timingSafeEqual`.
+- The handshake itself is unauthenticated (origin-validated only); SIWS verification happens in-band post-open. Each connection is held in an `unauthenticated` state until `auth_response` verifies successfully or `AUTH_HANDSHAKE_TIMEOUT_MS` elapses.
+- Ed25519 verification uses a constant-time library (`tweetnacl` / `@noble/curves`); nonces are tracked in an in-memory store with `AUTH_NONCE_TTL_MS` expiry and are single-use (consumed on successful verification).
 - Connection count is hard-capped at `MAX_CONNECTIONS`; the excess client receives close code `4002` (`Too many connections`).
 
 ---
@@ -566,7 +700,7 @@ All configuration is via environment variables, validated at startup with Zod sc
 | Variable | Description |
 |---|---|
 | `AGENT_KEYPAIR` | Base58-encoded secret key (or JSON byte array) for the agent wallet |
-| `WEB_CHANNEL_TOKEN` | Shared secret for WebSocket authentication. **Must be at least 32 characters.** Generate with `openssl rand -hex 24` (48 hex chars) or `openssl rand -hex 32` (64 hex chars). |
+| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Required only when `AGENT_AUTH_MODE=allowlist` and `wallets.allowlist.json` is not provided. The owner is always allowed regardless. |
 | LLM API Key | One of: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` |
 
 #### Optional (with defaults)
@@ -574,6 +708,12 @@ All configuration is via environment variables, validated at startup with Zod sc
 | Variable | Default | Description |
 |---|---|---|
 | `AGENT_MODE` | `public` | `"public"` or `"autonomous"` |
+| `AGENT_AUTH_MODE` | auto-resolved | SIWS auth tier: `owner`, `allowlist`, `open`. Auto-resolves to `owner` for autonomous and `allowlist` (if `WALLET_ALLOWLIST` set) / `open` for public (§5.1). |
+| `AUTH_NONCE_TTL_MS` | `60000` | How long an issued SIWS nonce stays valid before the client must respond. |
+| `AUTH_HANDSHAKE_TIMEOUT_MS` | `30000` | Hard timeout for the full handshake before the server closes the socket. |
+| `WALLET_RATE_LIMIT_MAX` | `60` | Per-wallet sliding-window cap on post-auth chat messages. |
+| `WALLET_RATE_LIMIT_WINDOW_MS` | `60000` | Sliding window length for the per-wallet limiter. |
+| `WALLET_RATE_LIMIT_MAX_KEYS` | `10000` | LRU cap on tracked wallets in the per-wallet limiter. |
 | `LLM_MODEL` | `anthropic/claude-sonnet-4-5-20250929` | Mastra model identifier (`provider/model` format) |
 | `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | Solana JSON-RPC endpoint |
 | `WEB_CHANNEL_PORT` | `3002` | WebSocket server port |
@@ -594,6 +734,8 @@ All configuration is via environment variables, validated at startup with Zod sc
 
 | Variable | Description |
 |---|---|
+| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Merged (deduped) with `wallets.allowlist.json` if that file exists. Required when `AGENT_AUTH_MODE=allowlist` unless the file is populated. |
+| `WALLET_ALLOWLIST_PATH` | Override the path of the allowlist file (default: `wallets.allowlist.json` at the workspace root). The file is hot-reloaded every 5s by mtime polling. |
 | `BOOTSTRAP_WALLET` | Base58 pubkey of the wallet allowed to bootstrap the agent. Required for autonomous mode pre-registration — the server refuses to start in autonomous mode without either `BOOTSTRAP_WALLET` or a persisted `AGENT_ASSET_ADDRESS`. Once registered, the on-chain asset owner takes precedence (see §3.4). |
 | `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted otherwise) |
 | `AGENT_TOKEN_MINT` | Operator override for token mint (auto-persisted otherwise) |
@@ -607,7 +749,7 @@ All configuration is via environment variables, validated at startup with Zod sc
 
 ### 8.2 UI Environment
 
-The chat UI lives in a sibling repo, [`metaplex-agent-chat-template`](../../metaplex-agent-chat-template), with its own `.env.local`. See that repo's README for the full `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` variable list. The only cross-repo contract: `NEXT_PUBLIC_WS_TOKEN` in the UI must match `WEB_CHANNEL_TOKEN` here.
+The chat UI lives in a sibling repo, [`metaplex-agent-chat-template`](../../metaplex-agent-chat-template), with its own `.env.local`. See that repo's README for the full `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` variable list. The UI authenticates each session via the SIWS handshake using the connected browser wallet — there is no shared token to mirror. The cross-repo contract is that `NEXT_PUBLIC_WS_HOST` points at the agent and the wallet the user connects with is allowed by the agent's `AGENT_AUTH_MODE` tier.
 
 ---
 
@@ -695,7 +837,7 @@ Every WebSocket connection gets its own `Session` object — not a share of a se
 This design has three concrete consequences:
 
 1. **Multi-user safety in public mode.** Client A asking about their wallet cannot leak A's balance, holdings, or signatures to Client B. A second connection never inherits A's history or typing state.
-2. **No sticky owner verification in autonomous mode.** `isOwnerVerified` is per-session, so once an owner-verified client disconnects, a subsequent non-owner connection starts with `isOwnerVerified=false` and is rejected at the connection gate (§5.3, Layer 1).
+2. **No sticky owner verification in autonomous mode.** `isOwnerVerified` is per-session, so once an owner-verified client disconnects, a subsequent non-owner connection starts unauthenticated; the SIWS handshake (§5.1) re-establishes owner verification per-connection rather than per-process.
 3. **Clean shutdown on disconnect.** When a session closes, its abort controller is fired, its pending transactions are rejected with a "client disconnected" error, and its `aliveCheck` interval is cleared. No orphaned promises or memory leaks.
 
 Conversation persistence across restarts is still out of scope (see §12.5); per-session state is strictly in-memory.
@@ -761,19 +903,19 @@ The WebSocket server runs unencrypted (`ws://`) by default. In production, termi
 
 ### 12.2 Authentication & Authorization
 
-The template includes a layered authorization system (see §5.4) that enforces access control programmatically:
+The template includes a layered authorization system (see §5.5) that enforces access control programmatically:
 
-- **Autonomous mode** is owner-gated at the connection level -- non-owners cannot interact
-- **Public mode** uses per-tool auth levels to restrict treasury operations to the owner
-- **Owner identity** is derived from the on-chain agent asset, with `BOOTSTRAP_WALLET` as a bootstrap fallback
+- **Connection authentication.** Wallet-signature-based via Sign-In-With-Solana (SIWS). `AGENT_AUTH_MODE` selects the tier — `owner`, `allowlist`, or `open` — defaulting to `owner` for autonomous mode and `allowlist`/`open` for public mode depending on whether `WALLET_ALLOWLIST` is set. The full model is specified in §5.1.
+- **Per-tool authorization.** Each tool declares an `auth` level (`public` or `owner`); the policy gate runs before `execute` (§5.5). `owner`-level tools are admitted only when the SIWS-bound `walletAddress` matches the resolved on-chain owner.
+- **Owner identity.** Derived from the on-chain agent asset, with `BOOTSTRAP_WALLET` as a bootstrap fallback (§3.4).
 
-The WebSocket transport uses a single shared token (`WEB_CHANNEL_TOKEN`, ≥ 32 chars). For production deployments:
+For production deployments:
 
-- **Use subprotocol or Authorization-header auth, not the query param.** The query param leaks the token through reverse-proxy access logs, browser history, and Referer headers. The subprotocol form (`Sec-WebSocket-Protocol: bearer, <token>`) travels only in the WebSocket handshake and is the recommended default for browser clients (see §6.2).
-- **Terminate TLS (wss://)** at the reverse proxy so the handshake -- including the subprotocol header -- is encrypted on the wire.
-- **Constrain origins.** `WS_ALLOWED_ORIGINS` is validated on connect; set it to exactly the origins that are allowed to open a WebSocket to this server.
-- **Consider per-user auth.** For multi-user deployments, issue per-user JWT tokens or session cookies bound to your application's auth system rather than sharing a single token across clients.
-- **Rate limiting.** The server already applies per-session rate limits; in front of it, an application-layer gateway (e.g., Cloudflare, a reverse proxy) should rate-limit handshake attempts by IP.
+- **Terminate TLS (wss://)** at the reverse proxy. The SIWS handshake itself is replay-protected, but transport encryption still matters for `auth_response` confidentiality and chat-content privacy.
+- **Pick the tightest tier that fits.** `owner` for headless autonomous deployments; `allowlist` for invite-only public deployments; `open` only when the agent is genuinely intended to accept any wallet (and rely on per-wallet rate limits + LLM cost budgets).
+- **Populate the allowlist via either source.** `wallets.allowlist.json` at the workspace root (hot-reloaded every 5s, gitignored) is the primary mechanism; `WALLET_ALLOWLIST=pk1,pk2,…` is the env-var fallback for cloud deploys without writable filesystems. The two are merged and deduped if both are present.
+- **Constrain origins.** `WS_ALLOWED_ORIGINS` is validated on connect; set it to exactly the origins allowed to open a WebSocket to this server.
+- **Rate limiting.** The server applies per-session and per-wallet sliding-window limits internally; in front of it, an application-layer gateway (Cloudflare, nginx `limit_req`, AWS WAF) should rate-limit **handshake** attempts by IP — SIWS verification is cheap but not free, and an attacker can burn nonces without authenticating.
 
 ### 12.3 RPC Endpoint
 
@@ -832,9 +974,13 @@ What remains out of scope for the template: cross-connection identity (a single 
 
 ```typescript
 type ClientMessage =
+  | {
+      type: 'auth_response';       // completes SIWS handshake (§5.1)
+      publicKey: string;           // base58 Solana pubkey
+      signature: string;           // base58 64-byte Ed25519 signature
+      message: string;             // exact UTF-8 canonical message that was signed
+    }
   | { type: 'message';           content: string; sender_name?: string }
-  | { type: 'wallet_connect';    address: string }
-  | { type: 'wallet_disconnect' }
   | { type: 'tx_result';         correlationId: string; signature: string }
   | { type: 'tx_error';          correlationId: string; reason: string };
 
@@ -842,6 +988,9 @@ type ClientMessage =
 // but the server tolerates a missing/malformed value — it substitutes the
 // literal string "User rejected or wallet error" and sanitizes any user-
 // supplied reason against SAFE_REASON_RE (`[\w\s.,:;'"()?!\-]{0,200}`).
+//
+// `wallet_connect` / `wallet_disconnect` were removed in protocol v2.0 —
+// the wallet is bound at SIWS auth time and cannot change without reconnecting.
 ```
 
 ### Server -> Client
@@ -849,6 +998,33 @@ type ClientMessage =
 ```typescript
 type ServerMessage =
   | { type: 'connected';            jid: string }
+  | {
+      type: 'auth_challenge';
+      nonce: string;                // 32 hex chars
+      issuedAt: string;             // ISO 8601
+      expiresAt: string;            // ISO 8601 (issuedAt + AUTH_NONCE_TTL_MS)
+      agentName: string;
+      agentAsset: string | null;    // null until the agent is registered
+      network: string;              // e.g. "solana-mainnet" / "solana-devnet"
+      authMode: 'owner' | 'allowlist' | 'open';
+    }
+  | {
+      type: 'authenticated';
+      walletAddress: string;
+      isOwner: boolean;
+      sessionId: string;
+    }
+  | {
+      type: 'auth_error';
+      code:
+        | 'nonce_expired'
+        | 'nonce_invalid'
+        | 'message_mismatch'
+        | 'signature_invalid'
+        | 'not_authorized'
+        | 'auth_timeout';
+      message: string;
+    }
   | { type: 'message';              content: string; sender: string }
   | { type: 'typing';               isTyping: boolean }
   | {
@@ -860,10 +1036,11 @@ type ServerMessage =
       total?: number;
       feeSol?: number;              // present in public mode when fee is prepended
     }
-  | { type: 'wallet_connected';     address: string }
-  | { type: 'wallet_disconnected' }
   | { type: 'error';                error: string; code?: string }
   | DebugMessage;
+
+// `wallet_connected` / `wallet_disconnected` were removed in protocol v2.0.
+// The session's wallet is reported once via `authenticated` and never changes.
 ```
 
 ## Appendix B: Agent Context Shape
@@ -906,6 +1083,8 @@ metaplex-agent-template/
   .dockerignore                   Docker build-context exclusions
   .npmrc                          shamefully-hoist=true (Umi compatibility)
   agent-state.json                Auto-generated agent identity (0600, gitignored)
+  wallets.allowlist.example.json  Template for the SIWS wallet allowlist file (§5.1)
+  wallets.allowlist.json          Operator-local allowlist (gitignored, hot-reloaded)
   Dockerfile                      Multi-stage server image (Node 20 slim, non-root)
   package.json                    Root workspace scripts (dev, build, clean, typecheck, bootstrap)
   pnpm-workspace.yaml             `packages/*`
@@ -920,18 +1099,23 @@ metaplex-agent-template/
 
   packages/
     shared/src/
-      config.ts                   Zod-validated env config loader + AGENT_KEYPAIR decoder
+      config.ts                   Zod-validated env config loader + AGENT_KEYPAIR decoder + auth env
       umi.ts                      createUmi() — Umi factory with keypair identity
       transaction.ts              submitOrSend() — mode-aware tx routing + fee prepend
       funding.ts                  ensureAgentFunded() — mode-aware top-up seam
       execute.ts                  executeAsAgent() + getAgentPda() — MPL Core Execute CPI
       auth.ts                     resolveOwner, ownerCache, defaultAuthPolicy, withAuth
+      siws.ts                     SIWS canonical-message builder/parser + Ed25519 verifier (§5.1)
+      nonce-store.ts              In-memory single-use nonce store (issue / consume / expire)
+      allowlist.ts                Tier-resolution pure function (owner / allowlist / open)
+      allowlist-file.ts           wallets.allowlist.json loader + mtime-polled hot-reload
+      wallet-rate-limit.ts        Per-wallet sliding-window limiter (LRU-bounded)
       context.ts                  readAgentContext() — shared AgentContext extractor
       error-codes.ts              toToolError() classifier + ToolErrorCodes
       server-limits.ts            getServerLimits() — funding + per-message token/tool caps
       jupiter.ts                  Quote, swap, price helpers + simulateAndVerifySwap
       state.ts                    agent-state.json atomic read/write
-      types/protocol.ts           PlexChat Client/Server/Debug message unions
+      types/protocol.ts           PlexChat Client/Server/Debug message unions (incl. SIWS)
       types/agent.ts              AgentContext + TransactionSender
       types/tool-result.ts        ToolResult<T> + ok() / info() / err()
       index.ts                    Barrel exports

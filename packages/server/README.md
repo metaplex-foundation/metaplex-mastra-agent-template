@@ -6,11 +6,11 @@ The PlexChat WebSocket server for the Metaplex Agent Template. This package prov
 
 The server is a standalone WebSocket process built on the `ws` library. It:
 
-- Authenticates incoming WebSocket connections with a shared token
-- Routes chat messages to the Mastra agent and streams responses back
-- Manages wallet state (connect/disconnect) and injects it into agent context
+- Authenticates incoming WebSocket connections via a Sign-In-With-Solana (SIWS) handshake; the signing wallet is bound to the session for its lifetime
+- Enforces tier-based authorization (`owner` / `allowlist` / `open`) plus a per-wallet sliding-window rate limit
+- Routes chat messages to the Mastra agent and streams responses back (per-session conversation state, no cross-session broadcast)
 - Bridges transactions from agent tools to the frontend for wallet signing (public mode)
-- Broadcasts typing indicators during agent processing
+- Emits typing indicators and debug telemetry to the originating session only
 
 ## Running the Server
 
@@ -38,18 +38,15 @@ All configuration is read from environment variables (via the shared `getConfig(
 | Variable            | Type     | Default                              | Description                                        |
 |---------------------|----------|--------------------------------------|----------------------------------------------------|
 | `WEB_CHANNEL_PORT`  | `number` | `3002`                               | Port the WebSocket server listens on.              |
-| `WEB_CHANNEL_TOKEN` | `string` | **(required)**                       | Shared secret for authenticating WebSocket clients. |
+| `AGENT_AUTH_MODE`   | `string` | auto-resolved                        | `owner` / `allowlist` / `open`. See [Authentication](#authentication). |
+| `WALLET_ALLOWLIST`  | `string` | *(empty)*                            | Comma-separated base58 pubkeys; merged with `wallets.allowlist.json`. |
 | `ASSISTANT_NAME`    | `string` | `Agent`                              | Name shown as the sender in agent chat responses.  |
 | `AGENT_MODE`        | `string` | `public`                             | `public` or `autonomous`. Controls transaction flow.|
 | `LLM_MODEL`        | `string` | `anthropic/claude-sonnet-4-5-20250929` | LLM provider and model in `provider/model` format.  |
 | `SOLANA_RPC_URL`    | `string` | `https://api.devnet.solana.com`      | Solana RPC endpoint.                               |
-| `AGENT_KEYPAIR`     | `string` | *(optional)*                         | Base58 secret key. Required only in autonomous mode.|
+| `AGENT_KEYPAIR`     | `string` | **(required)**                       | Base58 secret key or JSON byte array. Required in both modes. |
 
-Generate a secure token with:
-
-```bash
-openssl rand -hex 24
-```
+The full env contract lives in [`.env.example`](../../.env.example) and [`docs/SPEC.md`](../../docs/SPEC.md) §8.1.
 
 ## Protocol Message Summary
 
@@ -59,21 +56,25 @@ The full protocol specification is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PR
 
 | Type                | Direction        | Description                                                 |
 |---------------------|------------------|-------------------------------------------------------------|
+| `auth_response`     | Client -> Server | SIWS handshake response. Fields: `publicKey`, `signature`, `message`. |
 | `message`           | Client -> Server | Send a chat message to the agent. Fields: `content`, optional `sender_name`. |
-| `wallet_connect`    | Client -> Server | Notify the server a Solana wallet is connected. Field: `address`. |
-| `wallet_disconnect` | Client -> Server | Notify the server the wallet has been disconnected.         |
+| `tx_result`         | Client -> Server | Report a signed transaction. Fields: `correlationId`, `signature`. |
+| `tx_error`          | Client -> Server | Report a failed/rejected transaction. Fields: `correlationId`, `reason`. |
 
 ### Server to Client
 
-| Type                  | Direction        | Delivery  | Description                                                       |
-|-----------------------|------------------|-----------|-------------------------------------------------------------------|
-| `connected`           | Server -> Client | Unicast   | Sent on successful connection. Contains `jid` identifier.         |
-| `message`             | Server -> Client | Broadcast | Agent's chat response. Contains `content` and `sender` name.     |
-| `typing`              | Server -> Client | Broadcast | Typing indicator. `isTyping: true` when processing starts, `false` when done. |
-| `transaction`         | Server -> Client | Broadcast | Base64-encoded Solana transaction for wallet signing. Optional `message`, `index`, `total`. |
-| `wallet_connected`    | Server -> Client | Broadcast | Confirms a wallet was connected. Contains `address`.              |
-| `wallet_disconnected` | Server -> Client | Broadcast | Confirms the wallet was disconnected.                             |
-| `error`               | Server -> Client | Unicast   | Error response for invalid client messages.                       |
+All server → client messages are unicast to the originating session.
+
+| Type             | Direction        | Description                                                       |
+|------------------|------------------|-------------------------------------------------------------------|
+| `connected`      | Server -> Client | Sent on successful WS open. Contains `jid` identifier.            |
+| `auth_challenge` | Server -> Client | SIWS handshake challenge. Contains `nonce`, `agentName`, `agentAsset`, `network`, `authMode`, timestamps. |
+| `authenticated`  | Server -> Client | Handshake succeeded. Contains `walletAddress`, `isOwner`, `sessionId`. |
+| `auth_error`     | Server -> Client | Handshake failed. Contains `code` (one of `nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout`) and `message`. Socket is closed with code `4001`. |
+| `message`        | Server -> Client | Agent's chat response. Contains `content` and `sender` name.     |
+| `typing`         | Server -> Client | Typing indicator. `isTyping: true` when processing starts, `false` when done. |
+| `transaction`    | Server -> Client | Base64-encoded Solana transaction for wallet signing. Optional `message`, `index`, `total`, `feeSol`. |
+| `error`          | Server -> Client | Error response for invalid client messages.                       |
 
 ## How the Transaction Bridge Works
 
@@ -81,21 +82,24 @@ In public mode, the agent cannot sign transactions itself. Instead, transactions
 
 Here is the flow:
 
-1. A chat message arrives. The server creates a `TransactionSender` that wraps the WebSocket `broadcast` method:
+1. A chat message arrives on an authenticated session. The server creates a `TransactionSender` bound to *that* session — transactions are unicast back to the originating socket only, never broadcast:
 
 ```typescript
 const transactionSender: TransactionSender = {
-  sendTransaction: (tx: ServerTransaction) => this.broadcast(tx),
+  sendTransaction: (tx: ServerTransaction) => session.send(tx),
 };
 ```
 
-2. The server builds a Mastra `RequestContext` populated with three values:
+2. The server builds a Mastra `RequestContext` populated with the session-scoped values:
 
 ```typescript
 const requestContext = new RequestContext<AgentContext>([
-  ['walletAddress', this.walletAddress],
+  ['walletAddress', session.walletAddress],
   ['transactionSender', transactionSender],
   ['agentMode', config.AGENT_MODE],
+  ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
+  ['ownerWallet', this.ownerWallet],
+  // ...plus tokenOverride, txCounter (autonomous), abortSignal, etc.
 ]);
 ```
 
@@ -107,39 +111,29 @@ In autonomous mode, the `transactionSender` is still injected but never used. Th
 
 ## Authentication
 
-The server supports two authentication methods, checked in order:
+Authentication is performed via Sign-In-With-Solana (SIWS) immediately after the WebSocket handshake. The full protocol is in [`WEBSOCKET_PROTOCOL.md`](../../WEBSOCKET_PROTOCOL.md); the short version:
 
-### 1. Query Parameter (recommended)
+1. Client opens `ws://host:port` (no query param, no bearer header — those are gone).
+2. Server sends `auth_challenge` with a single-use nonce.
+3. Client signs the canonical SIWS message with their Solana wallet.
+4. Client sends `auth_response { publicKey, signature, message }`.
+5. Server verifies the Ed25519 signature, checks the wallet against the active tier, and either sends `authenticated` or `auth_error` + closes with `4001`.
 
-```
-ws://localhost:3002/?token=YOUR_TOKEN_HERE
-```
+Authorization tier is controlled by `AGENT_AUTH_MODE`:
 
-### 2. Authorization Header
+| Tier | Allowed wallets |
+|---|---|
+| `owner` | On-chain asset owner only (autonomous default) |
+| `allowlist` | Owner + entries in `wallets.allowlist.json` and/or `WALLET_ALLOWLIST` env (public default if list is set) |
+| `open` | Any wallet that completes SIWS (public default when no allowlist) |
 
-```javascript
-const ws = new WebSocket('ws://localhost:3002/', {
-  headers: {
-    'Authorization': 'Bearer YOUR_TOKEN_HERE'
-  }
-});
-```
-
-If the token does not match `WEB_CHANNEL_TOKEN`, the connection is immediately closed with code `4001` and reason `"Unauthorized"`.
-
-Authentication is connection-level only. Once connected, individual messages do not require further authentication.
+The owner is always allowed regardless of tier.
 
 ## Wallet State Management
 
-Wallet state is managed as a **single global variable** on the `PlexChatServer` instance:
+The connecting wallet is bound to the session at SIWS auth time and stays fixed for the connection's lifetime. Each WebSocket connection is its own session — `walletAddress`, conversation history, and pending-tx queue all live on the session object, not on the server singleton. Multiple users can connect concurrently without interfering.
 
-- **Scope**: Global per server process. All connected clients share the same wallet address.
-- **Persistence**: In-memory only. The wallet address is lost on server restart.
-- **Setting**: When any client sends `wallet_connect`, the address is stored and a `wallet_connected` message is broadcast to all clients.
-- **Clearing**: When any client sends `wallet_disconnect`, the address is set to `null` and a `wallet_disconnected` message is broadcast to all clients.
-- **Usage in agent**: If a wallet is connected, the server prepends `[User wallet: <address>]` to the chat message before sending it to the agent. The wallet address is also available to tools via the `RequestContext`.
-
-This global model works well for the intended single-user or kiosk-style deployment. For multi-user scenarios, you would need to scope wallet state per connection or per session.
+If you need a different wallet on the same browser, close the WebSocket and reconnect; the new connection re-runs the SIWS handshake.
 
 ## File Structure
 
