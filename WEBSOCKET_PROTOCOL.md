@@ -15,6 +15,8 @@ The Metaplex Agent Template exposes a WebSocket server implementing the **PlexCh
 > - New per-wallet sliding-window rate limit on **post-auth** chat-plane messages, complementing the existing per-session limiter.
 > - New S2C messages: `auth_challenge`, `authenticated`, `auth_error`. New C2S message: `auth_response`.
 >
+> Migrating an existing client? See [`docs/UI-SIWS-MIGRATION.md`](docs/UI-SIWS-MIGRATION.md) for a chat-template-focused walk-through.
+>
 > **v1.1 changes vs v1.0:** transactions now carry a server-assigned `correlationId`; `tx_result` requires `correlationId` + `signature`; new `tx_error` client message; all server -> client messages are unicast to the originating session (no cross-client broadcast); per-session wallet/conversation state.
 
 ## Connection
