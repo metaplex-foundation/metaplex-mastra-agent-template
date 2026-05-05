@@ -9,7 +9,6 @@ import {
   createUmi,
   getAgentKeypairPublicKey,
   getAgentPda,
-  buildSiwsMessage,
   verifySiwsSignature,
   NonceStore,
   isAuthorized,
@@ -328,6 +327,12 @@ export class PlexChatServer {
       isAlive = false;
     }, 60000);
 
+    // --- Message handler (registered BEFORE sending the challenge so any
+    //     speculative pre-challenge client message is buffered, not dropped) ---
+    ws.on('message', (data: RawData) => {
+      this.handleMessage(session, data);
+    });
+
     // --- Send connected message ---
     session.send({ type: 'connected', jid: `web:${session.id}` });
 
@@ -359,11 +364,6 @@ export class PlexChatServer {
         }
       }
     }, config.AUTH_HANDSHAKE_TIMEOUT_MS);
-
-    // --- Message handler ---
-    ws.on('message', (data: RawData) => {
-      this.handleMessage(session, data);
-    });
   }
 
   /**
@@ -399,9 +399,13 @@ export class PlexChatServer {
     if (!session) return;
     session.cleanup(reason);
     this.sessions.delete(ws);
-    // Re-emit context to remaining sessions so their connectedClients count updates
+    // Re-emit context to remaining AUTHENTICATED sessions so their
+    // connectedClients count updates. Pre-auth peers don't get debug:context
+    // (would leak agent metadata + tool list to unauthenticated clients).
     for (const other of this.sessions.values()) {
-      this.emitContext(other);
+      if (other.authStatus === 'authenticated') {
+        this.emitContext(other);
+      }
     }
   }
 
@@ -428,7 +432,15 @@ export class PlexChatServer {
       ) {
         return this.failAuth(session, 'not_authorized', 'auth_response expected.');
       }
-      await this.handleAuthResponse(session, parsed as ClientAuthResponse);
+      // Wrap in try/catch so a transient resolveOwner RPC failure (or any
+      // unexpected throw) becomes a clean auth_error + close instead of an
+      // unhandled rejection that takes down the process.
+      try {
+        await this.handleAuthResponse(session, parsed as ClientAuthResponse);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        this.failAuth(session, 'not_authorized', `Internal error during auth: ${detail.slice(0, 120)}`);
+      }
       return;
     }
 
