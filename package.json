@@ -4,7 +4,11 @@
   "private": true,
   "description": "Template for building Metaplex Agent Registry agents",
   "scripts": {
+    "setup": "tsx scripts/setup.ts",
+    "doctor": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && tsx scripts/doctor.ts",
     "dev": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && pnpm --filter @metaplex-agent/server dev",
+    "dev:full": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && tsx scripts/dev-full.ts",
+    "dev:ui": "pnpm --dir ../metaplex-agent-chat-template dev",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core build && pnpm -r typecheck",
@@ -15,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "concurrently": "^9.2.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
