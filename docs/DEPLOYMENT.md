@@ -6,6 +6,42 @@ Two first-class recipes — one per agent mode. Pick the section that matches yo
 
 ---
 
+## Auth tiers
+
+WebSocket authentication is wallet-signature-based (Sign-In-With-Solana). Every connection completes a SIWS handshake before any chat-plane traffic is accepted, and the wallet that signs the challenge becomes the session's `walletAddress`. There is no shared secret to leak — the legacy `WEB_CHANNEL_TOKEN` is gone.
+
+`AGENT_AUTH_MODE` selects which wallets are allowed to authenticate. When unset, the mode is auto-resolved from `AGENT_MODE`:
+
+| Tier | Default for | Allowed wallets | When to pick it |
+|---|---|---|---|
+| `owner` | `AGENT_MODE=autonomous` | Only the on-chain agent asset owner (resolved from `AGENT_ASSET_ADDRESS` or `BOOTSTRAP_WALLET` pre-registration). | Headless autonomous agents; owner-only inspection consoles. Nothing to configure — the owner is auto-resolved. |
+| `allowlist` | `AGENT_MODE=public` if `WALLET_ALLOWLIST` is non-empty | Owner ∪ wallets in `wallets.allowlist.json` (file) ∪ `WALLET_ALLOWLIST` env. | Invite-only public deployments: closed beta, paid users, internal tooling. |
+| `open` | `AGENT_MODE=public` if no allowlist is configured | Any wallet that completes a valid SIWS signature. | Genuinely public agents. Lean on per-wallet rate limits and LLM cost budgets to bound abuse. |
+
+The owner is **always** authorized regardless of tier — there is no need to list yourself.
+
+**Allowlist sources.** Two sources, merged and deduplicated:
+
+1. **File (primary):** `wallets.allowlist.json` at the workspace root with shape `{ "wallets": ["pk1", "pk2", ...] }`. The path is overridable via `WALLET_ALLOWLIST_PATH`. Hot-reloaded every 5s by mtime polling — operators can add or remove wallets without restarting the server. The file is gitignored; ship `wallets.allowlist.example.json` instead.
+2. **Env (fallback):** `WALLET_ALLOWLIST=pk1,pk2,...` for cloud deploys without writable filesystems (Railway, Fly, etc.). Empty entries are dropped.
+
+**Tunables (all optional, defaults shown):**
+
+| Var | Default | Notes |
+|---|---|---|
+| `AGENT_AUTH_MODE` | auto-resolved | `owner` / `allowlist` / `open` — explicit override of the auto-default |
+| `WALLET_ALLOWLIST` | (empty) | comma-separated base58 pubkeys |
+| `WALLET_ALLOWLIST_PATH` | `wallets.allowlist.json` | override the file path if you mount it elsewhere |
+| `AUTH_NONCE_TTL_MS` | `60000` | how long an issued nonce is valid |
+| `AUTH_HANDSHAKE_TIMEOUT_MS` | `30000` | how long to wait for `auth_response` before closing |
+| `WALLET_RATE_LIMIT_MAX` | `60` | per-wallet chat-message cap (post-auth) |
+| `WALLET_RATE_LIMIT_WINDOW_MS` | `60000` | sliding window for the per-wallet limiter |
+| `WALLET_RATE_LIMIT_MAX_KEYS` | `10000` | LRU cap on tracked wallets |
+
+See [`WEBSOCKET_PROTOCOL.md`](../WEBSOCKET_PROTOCOL.md) § Authentication for the wire-level handshake and [`docs/SPEC.md`](./SPEC.md) §5.1 for the canonical auth model.
+
+---
+
 ## Public Mode — Multi-user chatbot behind a TLS proxy
 
 **Intended shape:** a long-lived WebSocket server sitting behind a reverse proxy that terminates TLS, serving many concurrent users who sign their own transactions in a browser wallet.
@@ -38,11 +74,11 @@ Two first-class recipes — one per agent mode. Pick the section that matches yo
 
 ### Minimum hardening checklist
 
-- [ ] Terminate TLS at the proxy. The WebSocket handshake is only encrypted on the wire if the transport is encrypted.
-- [ ] Use **subprotocol or Authorization-header auth** rather than the query-param token, so the token doesn't appear in access logs or Referer headers. See [`WEBSOCKET_PROTOCOL.md`](../WEBSOCKET_PROTOCOL.md) § Authentication.
+- [ ] Terminate TLS at the proxy. The SIWS handshake itself is replay-protected, but transport encryption still matters for `auth_response` confidentiality and chat-content privacy.
+- [ ] Pick the right `AGENT_AUTH_MODE` tier (see "Auth tiers" above). For invite-only deployments use `allowlist` and populate `wallets.allowlist.json` or `WALLET_ALLOWLIST`. Reserve `open` for agents you genuinely want to expose to any wallet on the internet.
 - [ ] Set `WS_ALLOWED_ORIGINS` to the exact origins allowed to open a WebSocket (CSWSH protection). Leaving localhost defaults in production is a bug.
-- [ ] Use a token ≥ 32 characters. In a real multi-tenant product, replace the single shared `WEB_CHANNEL_TOKEN` with per-user JWTs or session cookies tied to your app's auth.
-- [ ] Put an application-layer gateway (Cloudflare, nginx `limit_req`, AWS WAF) in front to cap handshake attempts by IP. The server's internal rate limits are per-session, not per-IP.
+- [ ] Tune the per-wallet rate limit (`WALLET_RATE_LIMIT_MAX` / `WALLET_RATE_LIMIT_WINDOW_MS`) to match your expected legitimate traffic; the defaults (60 messages / 60s) are a starting point, not a recommendation.
+- [ ] Put an application-layer gateway (Cloudflare, nginx `limit_req`, AWS WAF) in front to cap **handshake** attempts by IP — SIWS verification is cheap but not free, and an attacker can burn nonces without authenticating.
 - [ ] Set `SOLANA_RPC_URL` to a dedicated RPC provider. `api.devnet.solana.com` is development-only.
 - [ ] Set `MAX_MESSAGE_CONTENT`, `MAX_RPC_TIME_BUDGET_MS`, `MAX_STEPS` to values that match your expected load and LLM cost tolerance.
 - [ ] Store the LLM API key and `AGENT_KEYPAIR` in a secrets manager (AWS Secrets Manager, GCP Secret Manager, HashiCorp Vault) rather than a raw `.env` file.
@@ -88,7 +124,8 @@ server {
 ```dotenv
 AGENT_MODE=public
 AGENT_KEYPAIR=${AGENT_KEYPAIR_FROM_SECRETS_MANAGER}
-WEB_CHANNEL_TOKEN=${WEB_CHANNEL_TOKEN_FROM_SECRETS_MANAGER}
+AGENT_AUTH_MODE=allowlist
+WALLET_ALLOWLIST=${COMMA_SEPARATED_OPERATOR_PUBKEYS}
 SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}
 WS_ALLOWED_ORIGINS=https://app.example.com
 AGENT_FEE_SOL=0.001
@@ -124,11 +161,11 @@ CMD ["node", "packages/server/dist/index.js"]
 ### Runtime topology
 
 ```
- Owner wallet (only allowed principal)
+ Owner wallet (only allowed principal — SIWS-gated)
           │  (optional) WSS for manual inspection
           ▼
  ┌─────────────────────────────┐
- │  @metaplex-agent/server      │   single replica, owner-gated
+ │  @metaplex-agent/server      │   single replica, AGENT_AUTH_MODE=owner
  │  OR                          │
  │  Custom worker loop          │   event-driven / cron / once-per-hour
  └──────────────┬──────────────┘
@@ -157,9 +194,9 @@ CMD ["node", "packages/server/dist/index.js"]
 
 **A. WebSocket server, owner-gated (default)**
 
-Run `packages/server` as normal. The server's autonomous-mode connection gate rejects every non-owner WebSocket connection before the LLM is invoked (see `packages/server/src/websocket.ts`). Useful if you want to manually inspect or instruct the agent from an owner-wallet UI.
+Run `packages/server` as normal. Autonomous mode auto-resolves `AGENT_AUTH_MODE=owner`, so only the on-chain asset owner can complete the SIWS handshake — every other wallet is rejected with `auth_error: not_authorized` before the LLM is ever invoked. Useful if you want to manually inspect or instruct the agent from an owner-wallet UI.
 
-Bind to localhost or a VPC-internal interface — do not expose port 3002 to the public internet even with the owner gate. Ingress is unneeded.
+Bind to localhost or a VPC-internal interface — do not expose port 3002 to the public internet even with owner-only auth. Ingress is unneeded.
 
 **B. Worker loop, no WebSocket**
 
@@ -202,8 +239,9 @@ tick();
 ```dotenv
 AGENT_MODE=autonomous
 AGENT_KEYPAIR=${AGENT_KEYPAIR_FROM_SECRETS_MANAGER}
-WEB_CHANNEL_TOKEN=${WEB_CHANNEL_TOKEN_FROM_SECRETS_MANAGER}  # still required for any WSS access
 BOOTSTRAP_WALLET=${OWNER_WALLET_PUBKEY}
+# AGENT_AUTH_MODE auto-resolves to 'owner' in autonomous mode. Only the agent's
+# on-chain asset owner (or BOOTSTRAP_WALLET pre-registration) can authenticate.
 SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}
 JUPITER_API_KEY=${JUPITER_API_KEY_FROM_SECRETS_MANAGER}
 ```
@@ -294,8 +332,9 @@ The server reads `WEB_CHANNEL_PORT` and falls back to `PORT` if unset. Railway's
 ### Prerequisites
 
 - A Railway account and the [Railway CLI](https://docs.railway.com/guides/cli) (`npm i -g @railway/cli`), or just the web dashboard.
-- Your agent's secrets ready to paste: `AGENT_KEYPAIR`, `WEB_CHANNEL_TOKEN`, `SOLANA_RPC_URL`, and the LLM API key matching your `LLM_MODEL`.
-- For autonomous mode: `BOOTSTRAP_WALLET` (the pubkey that will trigger first-time registration).
+- Your agent's secrets ready to paste: `AGENT_KEYPAIR`, `SOLANA_RPC_URL`, and the LLM API key matching your `LLM_MODEL`.
+- For public mode with `allowlist`: a comma-separated `WALLET_ALLOWLIST` of wallets allowed to chat with the agent. (Railway's filesystem is ephemeral, so the env-var source is preferable to the `wallets.allowlist.json` file on this platform.)
+- For autonomous mode: `BOOTSTRAP_WALLET` (the pubkey that will trigger first-time registration). `AGENT_AUTH_MODE` auto-resolves to `owner` — no allowlist needed.
 
 ### Step 1 — Create the project
 
@@ -309,17 +348,19 @@ In the service's **Variables** tab, add the minimum set:
 # Required (both modes)
 AGENT_MODE=public                     # or autonomous
 AGENT_KEYPAIR=<base58 secret or JSON byte array>
-WEB_CHANNEL_TOKEN=<>=32 chars; openssl rand -hex 24>
 WEB_CHANNEL_PORT=3002                  # pin so Railway's domain target matches
 SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=...
 ANTHROPIC_API_KEY=<your key>           # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY
 WS_ALLOWED_ORIGINS=https://your-ui-domain.com
 
-# Public mode
+# Public mode (allowlist tier — recommended for invite-only beta)
+AGENT_AUTH_MODE=allowlist
+WALLET_ALLOWLIST=<pubkey1>,<pubkey2>   # comma-separated; owner is always allowed
 AGENT_FEE_SOL=0.001
 
 # Autonomous mode
 BOOTSTRAP_WALLET=<owner pubkey>
+# AGENT_AUTH_MODE auto-resolves to 'owner' — no further auth config needed
 ```
 
 See [`.env.example`](../.env.example) for the full catalog of tunables (`MAX_CONNECTIONS`, `MAX_MESSAGE_CONTENT`, `MAX_RPC_TIME_BUDGET_MS`, etc.).
@@ -364,13 +405,14 @@ In your UI deployment (e.g. Vercel), set:
 
 ```
 NEXT_PUBLIC_WS_HOST=your-agent-production.up.railway.app
-NEXT_PUBLIC_WS_TOKEN=<same WEB_CHANNEL_TOKEN as the server>
 NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta
 ```
 
 Then update `WS_ALLOWED_ORIGINS` on the Railway service to include the UI's public origin.
 
 `wsUrl()` auto-selects `wss://` for any non-localhost `NEXT_PUBLIC_WS_HOST` and drops the port when it's the default (`443` for `wss`, `80` for `ws`) — so a managed TLS host like Railway only needs `NEXT_PUBLIC_WS_HOST`. Override the protocol explicitly with `NEXT_PUBLIC_WS_PROTOCOL=ws|wss` if your setup needs it (e.g. a non-TLS internal hostname).
+
+The UI authenticates each connection via the SIWS handshake using the user's connected browser wallet — there is no shared token to inject. Make sure the wallets your users connect with are present in the agent's `WALLET_ALLOWLIST` (or that the agent runs in `open` mode if you want to accept any wallet).
 
 #### Vercel setup (UI)
 
@@ -380,7 +422,7 @@ The chat UI is a separate repo: [`metaplex-agent-chat-template`](https://github.
 - **Root Directory**: leave at repo root
 - **Install / Build Command**: defaults are fine — the UI is a standalone Next.js app with no workspace dependencies.
 
-Set `NEXT_PUBLIC_WS_HOST` to your agent's public hostname, `NEXT_PUBLIC_WS_TOKEN` to a value matching `WEB_CHANNEL_TOKEN` on the agent service, and add the UI's deployed origin to `WS_ALLOWED_ORIGINS` on the agent.
+Set `NEXT_PUBLIC_WS_HOST` to your agent's public hostname and add the UI's deployed origin to `WS_ALLOWED_ORIGINS` on the agent. SIWS authentication happens entirely via the connected wallet — no UI-side secret to provision.
 
 You can safely ignore the `pino-pretty` warning from `@walletconnect/logger` — it's an optional peer dep only used for dev-mode log formatting.
 
@@ -405,7 +447,7 @@ The server emits structured `console.log` events and, when `ENABLE_DEBUG_EVENTS=
 
 - Ship stdout/stderr to your log aggregator (Datadog, CloudWatch, Loki, etc.).
 - Alert on:
-  - `authLogger` warnings (`LOG_AUTH_FAILURES=true`) — origin rejections, token mismatches, owner-gate denials, rate-limit breaches.
+  - `authLogger` warnings (`LOG_AUTH_FAILURES=true`) — origin rejections, SIWS handshake failures (`signature_invalid`, `nonce_expired`, `not_authorized`, `auth_timeout`), and per-wallet rate-limit breaches.
   - RPC time-budget exhaustion events (`MAX_RPC_TIME_BUDGET_MS`).
   - Repeated tool errors from a single session (possible prompt injection probing).
 - For autonomous mode, additionally alert on:
