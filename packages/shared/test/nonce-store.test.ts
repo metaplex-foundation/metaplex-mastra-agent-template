@@ -28,3 +28,23 @@ test('NonceStore.consume fails for unknown nonce', () => {
   const store = new NonceStore({ ttlMs: 60_000 });
   assert.deepEqual(store.consume('deadbeef'), { ok: false, reason: 'nonce_invalid' });
 });
+
+test('NonceStore.sweep evicts expired entries and keeps live ones', () => {
+  const store = new NonceStore({ ttlMs: 100, now: () => 0 });
+  const a = store.issue();
+  const b = store.issue();
+  assert.equal(store.size(), 2);
+  store.setNow(() => 50);
+  store.sweep();
+  assert.equal(store.size(), 2); // both still live
+  store.setNow(() => 200);
+  store.sweep();
+  assert.equal(store.size(), 0); // both expired and swept
+  assert.deepEqual(store.consume(a.nonce), { ok: false, reason: 'nonce_invalid' });
+  assert.deepEqual(store.consume(b.nonce), { ok: false, reason: 'nonce_invalid' });
+});
+
+test('NonceStore constructor rejects non-positive ttlMs', () => {
+  assert.throws(() => new NonceStore({ ttlMs: 0 }), /ttlMs must be a positive finite number/);
+  assert.throws(() => new NonceStore({ ttlMs: -1 }), /ttlMs must be a positive finite number/);
+});

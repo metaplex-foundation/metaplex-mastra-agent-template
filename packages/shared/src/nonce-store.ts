@@ -16,14 +16,25 @@ interface Entry {
 
 export interface NonceStoreOptions {
   ttlMs: number;
+  /** Returns ms since epoch. Defaults to `Date.now`. Test seam. */
   now?: () => number;
 }
 
+/**
+ * Single-use, TTL-bounded nonce store for SIWS challenge handshakes.
+ *
+ * Memory is unbounded: callers MUST invoke `sweep()` periodically to evict
+ * expired entries (and SHOULD enforce a max-size cap at the call site to
+ * defend against handshake-flood). The store itself does neither.
+ */
 export class NonceStore {
   private readonly entries = new Map<string, Entry>();
   private now: () => number;
 
   constructor(private readonly opts: NonceStoreOptions) {
+    if (!Number.isFinite(opts.ttlMs) || opts.ttlMs <= 0) {
+      throw new Error(`NonceStore: ttlMs must be a positive finite number (got ${opts.ttlMs})`);
+    }
     this.now = opts.now ?? (() => Date.now());
   }
 
@@ -56,9 +67,18 @@ export class NonceStore {
 
   /** Periodic sweep to bound memory under SIWS-flood. */
   sweep(): void {
+    // Map iteration is well-defined under in-place deletion: deleting the
+    // current key during iteration is safe per ECMAScript, and entries
+    // added after iteration starts may or may not be visited (they won't
+    // be expired yet anyway).
     const now = this.now();
     for (const [k, v] of this.entries) {
       if (now > v.expiresAtMs) this.entries.delete(k);
     }
+  }
+
+  /** Test/inspection seam — total tracked nonces (live + expired-but-not-swept). */
+  size(): number {
+    return this.entries.size;
   }
 }
