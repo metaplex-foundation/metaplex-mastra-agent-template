@@ -140,7 +140,6 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 | Variable | Description |
 |---|---|
 | `AGENT_KEYPAIR` | Base58-encoded secret key (or JSON byte array) for the agent wallet. Required in both modes -- the agent always has a keypair that signs registration, delegation, and treasury operations. |
-| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Required only when `AGENT_AUTH_MODE=allowlist` (and not provided via the `wallets.allowlist.json` file). The owner is always allowed regardless. |
 | LLM API Key | One of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`, matching the provider prefix in `LLM_MODEL`. |
 
 ### Optional (with defaults)
@@ -174,7 +173,7 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 
 | Variable | Description |
 |---|---|
-| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Merged (deduped) with the contents of `wallets.allowlist.json` if that file exists. Required when `AGENT_AUTH_MODE=allowlist` (unless the file is populated instead). |
+| `WALLET_ALLOWLIST` | Comma-separated base58 pubkeys allowed to authenticate via SIWS. Conditional: required only when `AGENT_AUTH_MODE=allowlist` AND no `wallets.allowlist.json` file is present at `WALLET_ALLOWLIST_PATH` (the two sources are merged and deduped when both exist). Optional / ignored in `owner` and `open` tiers. The on-chain owner is always allowed regardless of this list. |
 | `WALLET_ALLOWLIST_PATH` | Override the path of the allowlist file (default: `wallets.allowlist.json` at the workspace root). The file is hot-reloaded every 5s by mtime polling. |
 | `BOOTSTRAP_WALLET` | Base58 pubkey of the wallet allowed to bootstrap the agent. Required for autonomous mode pre-registration (server refuses to start without it). Once the agent is registered on-chain, the asset owner takes precedence and this value is no longer consulted. |
 | `AGENT_ASSET_ADDRESS` | Operator override for registry address (auto-persisted to `agent-state.json` otherwise) |

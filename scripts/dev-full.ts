@@ -14,7 +14,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync } from 'node:fs';
+import { copyFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,8 +30,27 @@ function log(...args: unknown[]): void {
   console.log('[dev:full]', ...args);
 }
 
+function isDirectory(path: string): boolean {
+  // existsSync is true for files, symlinks-to-files, and broken symlinks —
+  // any of which would produce a confusing spawnSync error when used as cwd.
+  // Stat-then-isDirectory is the explicit predicate.
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function ensureChatTemplate(): void {
-  if (existsSync(CHAT_TEMPLATE_DIR)) {
+  if (existsSync(CHAT_TEMPLATE_DIR) && !isDirectory(CHAT_TEMPLATE_DIR)) {
+    console.error(
+      `[dev:full] CHAT_TEMPLATE_DIR points to a non-directory: ${CHAT_TEMPLATE_DIR}\n` +
+      `  This must be a directory containing the chat-template repo. Either remove\n` +
+      `  the file/symlink at that path or set CHAT_TEMPLATE_DIR to a real directory.`,
+    );
+    process.exit(1);
+  }
+  if (isDirectory(CHAT_TEMPLATE_DIR)) {
     log(`chat-template found at ${CHAT_TEMPLATE_DIR}`);
   } else {
     log(`chat-template missing at ${CHAT_TEMPLATE_DIR}`);
@@ -105,7 +124,20 @@ function run(): void {
     ],
     { stdio: 'inherit', cwd: ROOT, shell: false },
   );
-  child.on('exit', (code) => process.exit(code ?? 0));
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      // Child died from a signal — propagate it to ourselves so any parent
+      // shell sees the same termination cause (matches conventional
+      // signal-aware exit codes 128+N). We tear our own forwarding handler
+      // down first so re-emitting the signal isn't intercepted; the
+      // default handler then terminates the process with the signal.
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('SIGTERM');
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 0);
+  });
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.on(sig, () => child.kill(sig));
   }

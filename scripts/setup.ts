@@ -144,16 +144,27 @@ async function main(): Promise<void> {
   } else {
     while (true) {
       agentKeypair = (await ask('Paste base58 64-byte secret key')).trim();
+      // Keep the decode error path separate from pubkeyFromKeypair's so a
+      // canonical-layout mismatch (e.g. seed||stale-pubkey blob) surfaces
+      // its real reason instead of being collapsed into "Not valid base58".
+      let decoded: Uint8Array;
       try {
-        const decoded = bs58.decode(agentKeypair);
-        if (decoded.length !== 64) {
-          console.log(`  Expected 64 bytes, got ${decoded.length}. Try again.`);
-          continue;
-        }
-        agentPubkey = pubkeyFromKeypair(agentKeypair);
-        break;
+        decoded = bs58.decode(agentKeypair);
       } catch {
         console.log('  Not valid base58. Try again.');
+        continue;
+      }
+      if (decoded.length !== 64) {
+        console.log(`  Expected 64 bytes, got ${decoded.length}. Try again.`);
+        continue;
+      }
+      try {
+        agentPubkey = pubkeyFromKeypair(agentKeypair);
+        break;
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        console.log(`  ${detail}`);
+        // Loop and let the operator paste a different key.
       }
     }
   }
