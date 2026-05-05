@@ -98,10 +98,11 @@ export class PlexChatServer {
     const config = getConfig();
     this.nonceStore = new NonceStore({ ttlMs: config.AUTH_NONCE_TTL_MS });
     this.allowlistFile = new AllowlistFile({
-      // v1: hard-coded path at the workspace root (process.cwd()), matching
-      // the agent-state.json convention. A future task may add a
-      // WALLET_ALLOWLIST_PATH env var if operators need a different location.
-      path: 'wallets.allowlist.json',
+      // Path is operator-configurable (WALLET_ALLOWLIST_PATH); defaults to
+      // 'wallets.allowlist.json' at process.cwd() — same convention as
+      // agent-state.json. Cloud deploys (Railway/Fly/k8s) typically mount the
+      // file at a different path and override via env.
+      path: config.WALLET_ALLOWLIST_PATH,
       envFallback: config.WALLET_ALLOWLIST,
       pollIntervalMs: 5_000,
     });

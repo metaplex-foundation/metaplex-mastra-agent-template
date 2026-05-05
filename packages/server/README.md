@@ -6,11 +6,11 @@ The PlexChat WebSocket server for the Metaplex Agent Template. This package prov
 
 The server is a standalone WebSocket process built on the `ws` library. It:
 
-- Authenticates incoming WebSocket connections with a shared token
-- Routes chat messages to the Mastra agent and streams responses back
-- Manages wallet state (connect/disconnect) and injects it into agent context
+- Authenticates incoming WebSocket connections via a Sign-In-With-Solana (SIWS) handshake; the signing wallet is bound to the session for its lifetime
+- Enforces tier-based authorization (`owner` / `allowlist` / `open`) plus a per-wallet sliding-window rate limit
+- Routes chat messages to the Mastra agent and streams responses back (per-session conversation state, no cross-session broadcast)
 - Bridges transactions from agent tools to the frontend for wallet signing (public mode)
-- Broadcasts typing indicators during agent processing
+- Emits typing indicators and debug telemetry to the originating session only
 
 ## Running the Server
 
@@ -82,21 +82,24 @@ In public mode, the agent cannot sign transactions itself. Instead, transactions
 
 Here is the flow:
 
-1. A chat message arrives. The server creates a `TransactionSender` that wraps the WebSocket `broadcast` method:
+1. A chat message arrives on an authenticated session. The server creates a `TransactionSender` bound to *that* session — transactions are unicast back to the originating socket only, never broadcast:
 
 ```typescript
 const transactionSender: TransactionSender = {
-  sendTransaction: (tx: ServerTransaction) => this.broadcast(tx),
+  sendTransaction: (tx: ServerTransaction) => session.send(tx),
 };
 ```
 
-2. The server builds a Mastra `RequestContext` populated with three values:
+2. The server builds a Mastra `RequestContext` populated with the session-scoped values:
 
 ```typescript
 const requestContext = new RequestContext<AgentContext>([
-  ['walletAddress', this.walletAddress],
+  ['walletAddress', session.walletAddress],
   ['transactionSender', transactionSender],
   ['agentMode', config.AGENT_MODE],
+  ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
+  ['ownerWallet', this.ownerWallet],
+  // ...plus tokenOverride, txCounter (autonomous), abortSignal, etc.
 ]);
 ```
 

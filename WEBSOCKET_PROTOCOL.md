@@ -85,7 +85,9 @@ Issued: {issuedAt}
 Expires: {expiresAt}
 ```
 
-The blank line after the greeting is intentional — wallets like Phantom and Solflare display this string verbatim in the signing prompt, and the formatting matters. Including `agentAsset` and `network` makes a signature non-replayable across agents and chains.
+The blank line after the greeting is intentional — wallets like Phantom and Solflare display this string verbatim in the signing prompt, and the formatting matters. Including `agentAsset` and `network` is what the user sees and approves, so a phishing UI cannot trick the user into signing a message that targets a different agent without it being visible in the wallet popup.
+
+**Server enforcement (v1):** the server only requires the signed message to contain `Nonce: <issuedNonce>` and pass Ed25519 verification against the supplied public key. It does not currently re-derive the canonical message and byte-compare it. The "wallet displays exactly what they sign" property is therefore the load-bearing defense against cross-agent / cross-chain replay — the server's nonce-only check is sufficient because each nonce is single-use, agent-scoped, and TTL-bounded. A future v2 refinement may store the issued challenge parameters with the nonce and tighten the check to byte-for-byte equality.
 
 If the agent has not yet been registered on-chain, `agentAsset` is `null` in the challenge; the client substitutes the literal string `unregistered` in the canonical message.
 

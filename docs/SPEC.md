@@ -246,7 +246,7 @@ Issued: {issuedAt}
 Expires: {expiresAt}
 ```
 
-The server re-derives the message from the stored nonce and rejects byte-mismatched submissions (`message_mismatch`) before signature verification — this preserves WYSIWYG signing in the wallet popup. Including `agentAsset` and `network` makes a signature non-replayable across agents and chains.
+**Server enforcement (v1):** the server requires the signed `message` to contain `Nonce: <issuedNonce>` (else `message_mismatch`) and to pass Ed25519 verification, but does not currently byte-compare the full canonical string. The "wallet displays exactly what they sign" property is the load-bearing defense against cross-agent / cross-chain replay; nonce single-use + TTL plus the wallet UI prompt are sufficient for v1. A future v2 refinement may store `(agentAsset, network, issuedAt, expiresAt)` alongside the nonce and require byte-for-byte equality.
 
 #### Authorization tiers
 

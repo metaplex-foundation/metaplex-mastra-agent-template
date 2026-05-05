@@ -178,6 +178,12 @@ const envSchema = z.object({
   AGENT_AUTH_MODE: authModeSchema,
   /** Comma-separated base58 pubkeys allowed in 'allowlist' tier. */
   WALLET_ALLOWLIST: walletAllowlistSchema,
+  /**
+   * Path to the JSON allowlist file (`{ "wallets": string[] }`). Resolved
+   * relative to the server's `process.cwd()` when not absolute. Default
+   * matches the workspace-root convention used by `agent-state.json`.
+   */
+  WALLET_ALLOWLIST_PATH: z.string().min(1).default('wallets.allowlist.json'),
   /** TTL of issued SIWS handshake nonces, in ms. */
   AUTH_NONCE_TTL_MS: z.coerce.number().int().min(5_000).max(600_000).default(60_000),
   /** Hard cap on how long the server waits for a SIWS handshake to complete. */
