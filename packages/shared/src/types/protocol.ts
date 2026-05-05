@@ -4,19 +4,17 @@
 
 // --- Client -> Server Messages ---
 
+export interface ClientAuthResponse {
+  type: 'auth_response';
+  publicKey: string;
+  signature: string;       // base58 Ed25519 signature
+  message: string;         // exact UTF-8 string the wallet signed
+}
+
 export interface ClientChatMessage {
   type: 'message';
   content: string;
   sender_name?: string;
-}
-
-export interface ClientWalletConnect {
-  type: 'wallet_connect';
-  address: string;
-}
-
-export interface ClientWalletDisconnect {
-  type: 'wallet_disconnect';
 }
 
 export interface ClientTransactionResult {
@@ -32,9 +30,8 @@ export interface ClientTransactionError {
 }
 
 export type ClientMessage =
+  | ClientAuthResponse
   | ClientChatMessage
-  | ClientWalletConnect
-  | ClientWalletDisconnect
   | ClientTransactionResult
   | ClientTransactionError;
 
@@ -66,13 +63,34 @@ export interface ServerTransaction {
   feeSol?: number; // pre-computed fee included in this tx (public mode)
 }
 
-export interface ServerWalletConnected {
-  type: 'wallet_connected';
-  address: string;
+export interface ServerAuthChallenge {
+  type: 'auth_challenge';
+  nonce: string;
+  issuedAt: string;
+  expiresAt: string;
+  agentName: string;
+  agentAsset: string | null;
+  network: 'solana-mainnet' | 'solana-devnet';
+  authMode: 'owner' | 'allowlist' | 'open';
 }
 
-export interface ServerWalletDisconnected {
-  type: 'wallet_disconnected';
+export interface ServerAuthenticated {
+  type: 'authenticated';
+  walletAddress: string;
+  isOwner: boolean;
+  sessionId: string;
+}
+
+export interface ServerAuthError {
+  type: 'auth_error';
+  code:
+    | 'nonce_expired'
+    | 'nonce_invalid'
+    | 'message_mismatch'
+    | 'signature_invalid'
+    | 'not_authorized'
+    | 'auth_timeout';
+  message: string;
 }
 
 export interface ServerError {
@@ -162,10 +180,11 @@ export type DebugMessage =
 
 export type ServerMessage =
   | ServerConnected
+  | ServerAuthChallenge
+  | ServerAuthenticated
+  | ServerAuthError
   | ServerChatMessage
   | ServerTyping
   | ServerTransaction
-  | ServerWalletConnected
-  | ServerWalletDisconnected
   | ServerError
   | DebugMessage;
