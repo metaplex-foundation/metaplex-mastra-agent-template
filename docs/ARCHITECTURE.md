@@ -22,7 +22,7 @@ This template supports two operating modes. Pick one before you go further — a
 | **You want this if** | Users interact via chat and approve each tx in Phantom / Solflare | The agent runs on its own schedule and nobody is in the loop |
 | **Example products** | Wallet cleanup bot, mint helper, token launch assistant, portfolio advisor | Treasury rebalancer, strategy bot, automated buybacks, scheduled payouts |
 | **`.env` setting** | `AGENT_MODE=public` | `AGENT_MODE=autonomous` + `BOOTSTRAP_WALLET=<pubkey>` |
-| **Chat UI useful?** | Yes — pair with [metaplex-agent-chat-template](../metaplex-agent-chat-template) | Usually no — autonomous agents don't need a chat frontend |
+| **Chat UI useful?** | Yes — pair with [metaplex-agent-chat-template](https://github.com/metaplex-foundation/metaplex-agent-chat-template) | Usually no — autonomous agents don't need a chat frontend |
 | **Deployment shape** | Long-lived WS server behind nginx/TLS, public ingress | Background worker, no public ingress, keypair in a secrets manager |
 
 **Unsure? Pick `public` — it's the default and the built-in UI lets you see everything working in minutes.** You can switch later by editing one env var.
@@ -85,7 +85,7 @@ Both modes share the same unified identity (keypair + on-chain asset + PDA + opt
 
 ### Public Mode (multi-user, user-signed txs)
 
-```
+```dotenv
 AGENT_MODE=public
 ```
 
@@ -102,7 +102,7 @@ Each WebSocket connection is its own session (isolated wallet, conversation hist
 
 ### Autonomous Mode (agent-signed txs, worker loop)
 
-```
+```dotenv
 AGENT_MODE=autonomous
 AGENT_KEYPAIR=<base58-encoded secret key>
 BOOTSTRAP_WALLET=<base58 pubkey>   # required until the agent registers on-chain
@@ -197,7 +197,7 @@ Set the corresponding API key environment variable for whichever provider you ch
 
 ### UI Environment
 
-The chat UI lives in [metaplex-agent-chat-template](../metaplex-agent-chat-template). See its `.env.local.example` and README for `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` configuration. The UI authenticates via the SIWS handshake using the connected browser wallet — there is no shared token to mirror. The only cross-repo contract is that the UI's `NEXT_PUBLIC_WS_HOST` points at the agent and the connecting wallet is allowed by the agent's `AGENT_AUTH_MODE` tier.
+The chat UI lives in [metaplex-agent-chat-template](https://github.com/metaplex-foundation/metaplex-agent-chat-template). See its `.env.local.example` and README for `NEXT_PUBLIC_WS_*` and `NEXT_PUBLIC_SOLANA_*` configuration. The UI authenticates via the SIWS handshake using the connected browser wallet — there is no shared token to mirror. The only cross-repo contract is that the UI's `NEXT_PUBLIC_WS_HOST` points at the agent and the connecting wallet is allowed by the agent's `AGENT_AUTH_MODE` tier.
 
 ---
 
@@ -275,7 +275,7 @@ metaplex-agent-template/
 
 ```
 
-The chat UI is a separate repo: [metaplex-agent-chat-template](../metaplex-agent-chat-template).
+The chat UI is a separate repo: [metaplex-agent-chat-template](https://github.com/metaplex-foundation/metaplex-agent-chat-template).
 
 ---
 

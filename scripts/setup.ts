@@ -18,7 +18,7 @@
  * new directory.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
@@ -119,8 +119,15 @@ async function main(): Promise<void> {
   console.log('\n1. Agent mode\n');
   console.log('  public     — end users sign their own transactions (chatbot, mint helper, etc.)');
   console.log('  autonomous — agent signs everything itself (treasury bot, scheduled job, etc.)\n');
-  const modeRaw = await ask('AGENT_MODE', 'public');
-  const mode = modeRaw === 'autonomous' ? 'autonomous' : 'public';
+  let mode: 'public' | 'autonomous' | null = null;
+  while (mode === null) {
+    const raw = (await ask('AGENT_MODE', 'public')).toLowerCase();
+    if (raw === 'public' || raw === 'autonomous') {
+      mode = raw;
+    } else {
+      console.log(`  "${raw}" is not a valid mode. Pick "public" or "autonomous".`);
+    }
+  }
 
   // 2. Keypair
   console.log('\n2. Agent keypair\n');
@@ -156,17 +163,22 @@ async function main(): Promise<void> {
   console.log('  1) Anthropic (default)');
   console.log('  2) OpenAI');
   console.log('  3) Google\n');
-  const choice = await ask('Pick provider [1-3]', '1');
-  const providerKey = choice === '2'
-    ? 'OPENAI_API_KEY'
-    : choice === '3'
-      ? 'GOOGLE_GENERATIVE_AI_API_KEY'
-      : 'ANTHROPIC_API_KEY';
-  const llmModel = providerKey === 'OPENAI_API_KEY'
-    ? 'openai/gpt-4o'
-    : providerKey === 'GOOGLE_GENERATIVE_AI_API_KEY'
-      ? 'google/gemini-2.5-pro'
-      : 'anthropic/claude-sonnet-4-5-20250929';
+  const PROVIDERS = {
+    '1': { key: 'ANTHROPIC_API_KEY' as const, model: 'anthropic/claude-sonnet-4-5-20250929' },
+    '2': { key: 'OPENAI_API_KEY' as const, model: 'openai/gpt-4o' },
+    '3': { key: 'GOOGLE_GENERATIVE_AI_API_KEY' as const, model: 'google/gemini-2.5-pro' },
+  } satisfies Record<string, { key: string; model: string }>;
+  let provider: typeof PROVIDERS[keyof typeof PROVIDERS] | null = null;
+  while (provider === null) {
+    const raw = (await ask('Pick provider [1-3]', '1')).trim();
+    if (raw in PROVIDERS) {
+      provider = PROVIDERS[raw as keyof typeof PROVIDERS];
+    } else {
+      console.log(`  "${raw}" is not a valid choice. Enter 1, 2, or 3.`);
+    }
+  }
+  const providerKey = provider.key;
+  const llmModel = provider.model;
   const llmKey = (await ask(`Paste ${providerKey} (leave blank to fill later)`)).trim();
 
   // 4. Wallet allowlist (public mode)
@@ -259,6 +271,11 @@ async function main(): Promise<void> {
   }
 
   writeFileSync(envPath, envContent, { mode: 0o600 });
+  // writeFileSync's `mode` only applies on file creation; an overwrite of
+  // an existing .env preserves whatever permissions were there before.
+  // Force 0600 explicitly so the secret-bearing file always lands locked
+  // down regardless of prior state.
+  chmodSync(envPath, 0o600);
   console.log(`\n  wrote ${envPath} (chmod 0600)`);
   if (appended.length > 0) {
     console.log(`  (${appended.length} key${appended.length === 1 ? '' : 's'} appended because .env.example was missing the placeholder line)`);

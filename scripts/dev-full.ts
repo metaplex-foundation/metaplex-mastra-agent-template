@@ -33,10 +33,6 @@ function log(...args: unknown[]): void {
 function ensureChatTemplate(): void {
   if (existsSync(CHAT_TEMPLATE_DIR)) {
     log(`chat-template found at ${CHAT_TEMPLATE_DIR}`);
-    // Skip the clone + install but still fall through to the .env.local
-    // bootstrap below — operators who cloned the chat-template manually
-    // (or pulled a fresh copy in CI) still need the example-to-real env
-    // copy on first run.
   } else {
     log(`chat-template missing at ${CHAT_TEMPLATE_DIR}`);
     log(`cloning from ${CHAT_TEMPLATE_REPO} ...`);
@@ -57,6 +53,14 @@ function ensureChatTemplate(): void {
       );
       process.exit(1);
     }
+  }
+
+  // pnpm install runs for both cloned and pre-existing checkouts whenever
+  // node_modules is missing. Covers (a) fresh clone, (b) operator who
+  // cloned manually but never installed, and (c) CI checkouts. Skipping
+  // when node_modules is present keeps the steady-state `pnpm dev:full`
+  // launch fast.
+  if (!existsSync(resolve(CHAT_TEMPLATE_DIR, 'node_modules'))) {
     log('installing chat-template deps (one-time)...');
     const install = spawnSync('pnpm', ['install'], {
       cwd: CHAT_TEMPLATE_DIR,
