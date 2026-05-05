@@ -74,6 +74,10 @@ export class AllowlistFile {
         fileWallets = [];
       } else {
         // Malformed file or transient read error — keep last good list.
+        // INVARIANT: do NOT update `this.snapshot` here. Leaving the prior
+        // mtime intact forces the next poll to re-attempt the read once
+        // the writer finishes (a partial-write race produces a fresh
+        // mtime that won't match snapshot.mtimeMs).
         console.warn(
           `[allowlist] failed to reload ${this.opts.path}: ${err instanceof Error ? err.message : String(err)}; keeping previous list`,
         );
@@ -85,7 +89,10 @@ export class AllowlistFile {
       .map((w) => w.trim())
       .filter((w) => w.length > 0);
     const merged = new Set<string>([...fileWallets, ...trimmedEnv]);
-    this.merged = [...merged];
+    // Freeze so callers can't mutate the in-memory allowlist via the
+    // `readonly string[]` returned by `current()` (TS readonly is
+    // compile-time only — this enforces the invariant at runtime).
+    this.merged = Object.freeze([...merged]) as string[];
   }
 
   current(): readonly string[] {
