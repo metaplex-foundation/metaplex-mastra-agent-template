@@ -42,24 +42,29 @@ The `getConfig()` function loads environment variables from the workspace root `
 | `AGENT_MODE`        | `'public' \| 'autonomous'`  | `'public'`                           | No       | Controls transaction signing behavior.       |
 | `LLM_MODEL`        | `string`                     | `'anthropic/claude-sonnet-4-5-20250929'` | No       | LLM provider and model in `provider/model` format. |
 | `SOLANA_RPC_URL`    | `string`                     | `'https://api.devnet.solana.com'`    | No       | Solana RPC endpoint URL.                     |
-| `AGENT_KEYPAIR`     | `string`                     | --                                   | No*      | Base58-encoded secret key. *Required in autonomous mode. |
+| `AGENT_KEYPAIR`     | `string`                     | --                                   | **Yes**  | Base58 secret key OR JSON byte array. Required in both modes. |
 | `WEB_CHANNEL_PORT`  | `number`                     | `3002`                               | No       | WebSocket server port.                       |
-| `WEB_CHANNEL_TOKEN` | `string`                     | --                                   | **Yes**  | Auth token for WebSocket connections.        |
+| `AGENT_AUTH_MODE`   | `'owner' \| 'allowlist' \| 'open'` | auto-resolved                | No       | Tier policy. Owner default in autonomous; allowlist/open default in public. |
+| `WALLET_ALLOWLIST`  | `string`                     | --                                   | No       | Comma-separated base58 pubkeys; merged with `wallets.allowlist.json`. |
 | `ASSISTANT_NAME`    | `string`                     | `'Agent'`                            | No       | Display name for agent chat messages.        |
+
+The full env contract is in [`.env.example`](../../.env.example) and [`docs/SPEC.md`](../../docs/SPEC.md) §8.1 — including nonce/handshake TTLs, per-wallet rate-limit knobs, and other tunables.
 
 ### Zod Schema
 
-The schema validates and coerces environment variables at startup:
+The schema validates and coerces environment variables at startup. Excerpt:
 
 ```typescript
 const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
-  AGENT_KEYPAIR: z.string().optional(),
+  AGENT_KEYPAIR: agentKeypairSchema, // base58 OR JSON byte array, length 64
   WEB_CHANNEL_PORT: z.coerce.number().default(3002),
-  WEB_CHANNEL_TOKEN: z.string().min(1, 'WEB_CHANNEL_TOKEN is required'),
+  AGENT_AUTH_MODE: z.enum(['owner', 'allowlist', 'open']).optional(),
+  WALLET_ALLOWLIST: walletAllowlistSchema, // comma-separated → string[]
   ASSISTANT_NAME: z.string().default('Agent'),
+  // ... see config.ts for the complete schema
 });
 ```
 
@@ -156,40 +161,45 @@ All PlexChat WebSocket protocol message types are defined here as TypeScript int
 
 ### Client to Server (ClientMessage)
 
-| Type                      | Interface               | Fields                                    |
-|---------------------------|-------------------------|-------------------------------------------|
-| `message`                 | `ClientChatMessage`     | `content: string`, `sender_name?: string` |
-| `wallet_connect`          | `ClientWalletConnect`   | `address: string`                         |
-| `wallet_disconnect`       | `ClientWalletDisconnect`| *(none beyond type)*                      |
+| Type                      | Interface                  | Fields                                                    |
+|---------------------------|----------------------------|-----------------------------------------------------------|
+| `auth_response`           | `ClientAuthResponse`       | `publicKey: string`, `signature: string`, `message: string` |
+| `message`                 | `ClientChatMessage`        | `content: string`, `sender_name?: string`                 |
+| `tx_result`               | `ClientTransactionResult`  | `correlationId: string`, `signature: string`              |
+| `tx_error`                | `ClientTransactionError`   | `correlationId: string`, `reason: string`                 |
 
 ```typescript
 export type ClientMessage =
+  | ClientAuthResponse
   | ClientChatMessage
-  | ClientWalletConnect
-  | ClientWalletDisconnect;
+  | ClientTransactionResult
+  | ClientTransactionError;
 ```
 
 ### Server to Client (ServerMessage)
 
-| Type                  | Interface                 | Fields                                                          |
-|-----------------------|---------------------------|-----------------------------------------------------------------|
-| `connected`           | `ServerConnected`         | `jid: string`                                                   |
-| `message`             | `ServerChatMessage`       | `content: string`, `sender: string`                             |
-| `typing`              | `ServerTyping`            | `isTyping: boolean`                                             |
-| `transaction`         | `ServerTransaction`       | `transaction: string`, `message?: string`, `index?: number`, `total?: number` |
-| `wallet_connected`    | `ServerWalletConnected`   | `address: string`                                               |
-| `wallet_disconnected` | `ServerWalletDisconnected`| *(none beyond type)*                                            |
-| `error`               | `ServerError`             | `error: string`                                                 |
+| Type             | Interface              | Fields                                                                              |
+|------------------|------------------------|-------------------------------------------------------------------------------------|
+| `connected`      | `ServerConnected`      | `jid: string`                                                                       |
+| `auth_challenge` | `ServerAuthChallenge`  | `nonce`, `issuedAt`, `expiresAt`, `agentName`, `agentAsset`, `network`, `authMode`  |
+| `authenticated`  | `ServerAuthenticated`  | `walletAddress: string`, `isOwner: boolean`, `sessionId: string`                    |
+| `auth_error`     | `ServerAuthError`      | `code` (one of 6 SIWS codes), `message: string` — socket then closes with `4001`     |
+| `message`        | `ServerChatMessage`    | `content: string`, `sender: string`                                                 |
+| `typing`         | `ServerTyping`         | `isTyping: boolean`                                                                 |
+| `transaction`    | `ServerTransaction`    | `transaction`, `correlationId`, `message?`, `index?`, `total?`, `feeSol?`           |
+| `error`          | `ServerError`          | `error: string`, `code?: string`                                                    |
 
 ```typescript
 export type ServerMessage =
   | ServerConnected
+  | ServerAuthChallenge
+  | ServerAuthenticated
+  | ServerAuthError
   | ServerChatMessage
   | ServerTyping
   | ServerTransaction
-  | ServerWalletConnected
-  | ServerWalletDisconnected
-  | ServerError;
+  | ServerError
+  | DebugMessage;
 ```
 
 ## AgentContext and TransactionSender
