@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { buildSiwsMessage } from '../src/siws.js';
+import nacl from 'tweetnacl';
+import bs58 from 'bs58';
+import { buildSiwsMessage, verifySiwsSignature } from '../src/siws.js';
 
 test('buildSiwsMessage produces canonical multiline string', () => {
   const msg = buildSiwsMessage({
@@ -33,4 +35,34 @@ test('buildSiwsMessage uses "unregistered" when agentAsset is null', () => {
     expiresAt: 'y',
   });
   assert.match(msg, /^Sign in to Treasury Bot\n\nAgent: unregistered\n/);
+});
+
+test('verifySiwsSignature accepts a valid signature', () => {
+  const kp = nacl.sign.keyPair();
+  const message = 'hello world';
+  const sigBytes = nacl.sign.detached(new TextEncoder().encode(message), kp.secretKey);
+  const ok = verifySiwsSignature({
+    message,
+    signatureBase58: bs58.encode(sigBytes),
+    publicKeyBase58: bs58.encode(kp.publicKey),
+  });
+  assert.equal(ok, true);
+});
+
+test('verifySiwsSignature rejects a tampered message', () => {
+  const kp = nacl.sign.keyPair();
+  const sig = nacl.sign.detached(new TextEncoder().encode('original'), kp.secretKey);
+  const ok = verifySiwsSignature({
+    message: 'tampered',
+    signatureBase58: bs58.encode(sig),
+    publicKeyBase58: bs58.encode(kp.publicKey),
+  });
+  assert.equal(ok, false);
+});
+
+test('verifySiwsSignature rejects malformed base58 inputs', () => {
+  assert.equal(
+    verifySiwsSignature({ message: 'x', signatureBase58: '!!!', publicKeyBase58: '!!!' }),
+    false,
+  );
 });
