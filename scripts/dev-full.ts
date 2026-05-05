@@ -33,43 +33,52 @@ function log(...args: unknown[]): void {
 function ensureChatTemplate(): void {
   if (existsSync(CHAT_TEMPLATE_DIR)) {
     log(`chat-template found at ${CHAT_TEMPLATE_DIR}`);
-    return;
-  }
-  log(`chat-template missing at ${CHAT_TEMPLATE_DIR}`);
-  log(`cloning from ${CHAT_TEMPLATE_REPO} ...`);
-  // spawnSync with array args bypasses the shell — paths and URLs are
-  // passed verbatim, so an operator-supplied CHAT_TEMPLATE_REPO containing
-  // shell metacharacters can't escape into command execution.
-  const clone = spawnSync(
-    'git',
-    ['clone', '--depth', '1', CHAT_TEMPLATE_REPO, CHAT_TEMPLATE_DIR],
-    { stdio: 'inherit' },
-  );
-  if (clone.status !== 0) {
-    console.error(
-      `[dev:full] clone failed. Either:\n` +
-      `  1. Set CHAT_TEMPLATE_DIR to a local checkout you already have, or\n` +
-      `  2. Manually run: git clone ${CHAT_TEMPLATE_REPO} ${CHAT_TEMPLATE_DIR}\n` +
-      `  3. Run \`pnpm dev\` here (server-only) and use any other PlexChat client.`,
+    // Skip the clone + install but still fall through to the .env.local
+    // bootstrap below — operators who cloned the chat-template manually
+    // (or pulled a fresh copy in CI) still need the example-to-real env
+    // copy on first run.
+  } else {
+    log(`chat-template missing at ${CHAT_TEMPLATE_DIR}`);
+    log(`cloning from ${CHAT_TEMPLATE_REPO} ...`);
+    // spawnSync with array args bypasses the shell — paths and URLs are
+    // passed verbatim, so an operator-supplied CHAT_TEMPLATE_REPO containing
+    // shell metacharacters can't escape into command execution.
+    const clone = spawnSync(
+      'git',
+      ['clone', '--depth', '1', CHAT_TEMPLATE_REPO, CHAT_TEMPLATE_DIR],
+      { stdio: 'inherit' },
     );
-    process.exit(1);
+    if (clone.status !== 0) {
+      console.error(
+        `[dev:full] clone failed. Either:\n` +
+        `  1. Set CHAT_TEMPLATE_DIR to a local checkout you already have, or\n` +
+        `  2. Manually run: git clone ${CHAT_TEMPLATE_REPO} ${CHAT_TEMPLATE_DIR}\n` +
+        `  3. Run \`pnpm dev\` here (server-only) and use any other PlexChat client.`,
+      );
+      process.exit(1);
+    }
+    log('installing chat-template deps (one-time)...');
+    const install = spawnSync('pnpm', ['install'], {
+      cwd: CHAT_TEMPLATE_DIR,
+      stdio: 'inherit',
+    });
+    if (install.status !== 0) {
+      console.error('[dev:full] pnpm install failed in chat-template');
+      process.exit(1);
+    }
   }
-  log('installing chat-template deps (one-time)...');
-  const install = spawnSync('pnpm', ['install'], {
-    cwd: CHAT_TEMPLATE_DIR,
-    stdio: 'inherit',
-  });
-  if (install.status !== 0) {
-    console.error('[dev:full] pnpm install failed in chat-template');
-    process.exit(1);
-  }
-  if (!existsSync(resolve(CHAT_TEMPLATE_DIR, '.env.local'))) {
+
+  // .env.local bootstrap runs regardless of whether we just cloned or the
+  // directory was already there — a cloned-but-not-configured chat-template
+  // still needs its env seeded before `pnpm dev` will start cleanly.
+  const envLocalPath = resolve(CHAT_TEMPLATE_DIR, '.env.local');
+  if (!existsSync(envLocalPath)) {
     const example = resolve(CHAT_TEMPLATE_DIR, '.env.local.example');
     if (existsSync(example)) {
       // copyFileSync avoids the platform-dependent `cp` shell call (Windows
       // doesn't have it on PATH by default) and removes another shell-
       // interpolation surface.
-      copyFileSync(example, resolve(CHAT_TEMPLATE_DIR, '.env.local'));
+      copyFileSync(example, envLocalPath);
       log('seeded chat-template .env.local from .env.local.example');
     }
   }

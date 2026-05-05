@@ -35,7 +35,7 @@ See [Agent Modes](#agent-modes) below for the full architectural detail, and [`d
 
 ## Architecture
 
-```
+```text
 +-----------------------------------------------------+
 |                     Frontend                         |
 |    (metaplex.com, metaplex-agent-chat-template, or  |
@@ -203,7 +203,7 @@ The chat UI lives in [metaplex-agent-chat-template](../metaplex-agent-chat-templ
 
 ## Project Structure
 
-```
+```text
 metaplex-agent-template/
   .env.example                  # Environment variable reference (grouped by mode)
   .dockerignore                 # Docker build-context exclusions

@@ -73,6 +73,33 @@ async function checkEnv(): Promise<void> {
 }
 
 // ---- 2. AGENT_KEYPAIR + balances ----
+
+/**
+ * Format a lamports balance (Umi's `basisPoints`) as a fixed-precision SOL
+ * string without going through the Number / 1e9 path. Lamports values can
+ * exceed Number.MAX_SAFE_INTEGER (2^53-1 ≈ 9e15) for whale wallets — Solana
+ * total supply is ~5.89e17 lamports — so the lossy float divide can drop
+ * trailing digits. Doing the divide entirely in BigInt keeps every digit
+ * exact.
+ */
+function formatSol(basisPoints: bigint | number | string | null | undefined, fractionDigits = 4): string {
+  if (basisPoints === null || basisPoints === undefined) return '0.0000 SOL';
+  let bp: bigint;
+  try {
+    bp = typeof basisPoints === 'bigint' ? basisPoints : BigInt(basisPoints);
+  } catch {
+    return 'unknown SOL';
+  }
+  const negative = bp < 0n;
+  const abs = negative ? -bp : bp;
+  const LAMPORTS_PER_SOL = 1_000_000_000n;
+  const whole = abs / LAMPORTS_PER_SOL;
+  const remainder = abs % LAMPORTS_PER_SOL; // 0 .. 999_999_999
+  const fracStr = remainder.toString().padStart(9, '0').slice(0, fractionDigits);
+  const sign = negative ? '-' : '';
+  return `${sign}${whole.toString()}.${fracStr} SOL`;
+}
+
 async function checkKeypair(): Promise<void> {
   try {
     const { createUmi, getAgentPda, getConfig } = await import('@metaplex-agent/shared');
@@ -80,12 +107,12 @@ async function checkKeypair(): Promise<void> {
     const cfg = getConfig();
     const umi = createUmi();
     const kpAddr = umi.identity.publicKey.toString();
-    const kpBal = Number((await umi.rpc.getBalance(umi.identity.publicKey)).basisPoints) / 1e9;
-    add('agent keypair', 'ok', `${kpAddr} (${kpBal.toFixed(4)} SOL)`);
+    const kpBal = formatSol((await umi.rpc.getBalance(umi.identity.publicKey)).basisPoints);
+    add('agent keypair', 'ok', `${kpAddr} (${kpBal})`);
     if (cfg.AGENT_ASSET_ADDRESS) {
       const pda = getAgentPda(umi, publicKey(cfg.AGENT_ASSET_ADDRESS));
-      const pdaBal = Number((await umi.rpc.getBalance(pda)).basisPoints) / 1e9;
-      add('agent PDA', 'ok', `${pda.toString()} (${pdaBal.toFixed(4)} SOL)`);
+      const pdaBal = formatSol((await umi.rpc.getBalance(pda)).basisPoints);
+      add('agent PDA', 'ok', `${pda.toString()} (${pdaBal})`);
     } else {
       add('agent PDA', 'skip', 'not registered yet (AGENT_ASSET_ADDRESS unset)');
     }
@@ -219,7 +246,23 @@ async function checkSiwsSmoke(): Promise<void> {
         });
       });
       sock.on('message', (raw) => {
-        const msg = JSON.parse(raw.toString());
+        const rawText = raw.toString();
+        let msg: { type?: string; [k: string]: unknown };
+        try {
+          msg = JSON.parse(rawText);
+        } catch (parseErr) {
+          finish(() => {
+            const detail = parseErr instanceof Error ? parseErr.message : String(parseErr);
+            add(
+              'SIWS smoke',
+              'warn',
+              `server sent invalid JSON: ${detail} (first 80 chars: ${rawText.slice(0, 80)})`,
+            );
+            sock.close();
+            resolveDone();
+          });
+          return;
+        }
         if (msg.type === 'auth_challenge') {
           const m = buildSiwsMessage({
             agentName: msg.agentName,

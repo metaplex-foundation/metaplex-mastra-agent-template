@@ -57,10 +57,35 @@ function generateKeypairBase58(): string {
   return bs58.encode(kp.secretKey);
 }
 
+/**
+ * Recover the canonical Ed25519 public key from a base58-encoded 64-byte
+ * secret key (Solana / NaCl / libsodium expanded format: `seed (32) ||
+ * pubkey (32)`).
+ *
+ * We don't trust the trailing 32 bytes blindly: `nacl.sign.keyPair.fromSecretKey`
+ * re-derives the pubkey from the seed and returns the canonical form. We
+ * then compare against the bytes the operator pasted — a mismatch means
+ * the input is either a different keypair format (e.g. raw seed only,
+ * or an unrelated 64-byte blob) or has been tampered with, and we fail
+ * fast instead of silently emitting a wrong wallet address.
+ */
 function pubkeyFromKeypair(secretKeyBase58: string): string {
   const decoded = bs58.decode(secretKeyBase58);
-  const pubkey = decoded.slice(32, 64);
-  return bs58.encode(pubkey);
+  if (decoded.length !== 64) {
+    throw new Error(`expected 64-byte secret key, got ${decoded.length} bytes`);
+  }
+  const derived = nacl.sign.keyPair.fromSecretKey(decoded);
+  const trailing = decoded.slice(32, 64);
+  for (let i = 0; i < 32; i++) {
+    if (derived.publicKey[i] !== trailing[i]) {
+      throw new Error(
+        'AGENT_KEYPAIR is not in canonical Ed25519 layout — the trailing 32 bytes ' +
+        'do not match the public key derived from the leading 32-byte seed. ' +
+        'Re-export from your wallet or regenerate via `pnpm setup`.',
+      );
+    }
+  }
+  return bs58.encode(derived.publicKey);
 }
 
 function isValidPubkey(s: string): boolean {
