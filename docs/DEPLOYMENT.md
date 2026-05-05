@@ -161,7 +161,7 @@ CMD ["node", "packages/server/dist/index.js"]
 ### Runtime topology
 
 ```
- Owner wallet (only allowed principal — SIWS-gated)
+ Owner wallet (SIWS required; authorization = owner-only)
           │  (optional) WSS for manual inspection
           ▼
  ┌─────────────────────────────┐
@@ -177,6 +177,8 @@ CMD ["node", "packages/server/dist/index.js"]
 
  AGENT_KEYPAIR ← mounted from Vault / Secrets Manager / KMS
 ```
+
+**Authentication vs authorization in this topology.** Every connection — including the owner's manual-inspection WSS session — completes the same SIWS handshake (the *authentication* mechanism, unchanged across tiers). `AGENT_AUTH_MODE=owner` controls *authorization*: only the wallet that matches the on-chain Agent Asset owner is admitted past the handshake; any other valid SIWS signature is rejected with `auth_error: not_authorized` and a `4001` close. The two layers are independent — switching tiers does not change the wire-level handshake.
 
 ### Minimum hardening checklist
 

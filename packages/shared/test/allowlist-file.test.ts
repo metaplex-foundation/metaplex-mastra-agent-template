@@ -48,6 +48,20 @@ test('AllowlistFile keeps last good list on malformed JSON', () => {
   assert.deepEqual(f.current(), ['pk1']); // unchanged
 });
 
+test('AllowlistFile uses envFallback when first construction sees malformed JSON', () => {
+  // No prior snapshot to preserve, so the env-supplied list must still be
+  // honored — otherwise a typo'd JSON file silently blanks the allowlist.
+  const p = tmpFile('{not valid json');
+  const f = new AllowlistFile({ path: p, envFallback: ['env-pk1', 'env-pk2'] });
+  assert.deepEqual([...f.current()].sort(), ['env-pk1', 'env-pk2']);
+});
+
+test('AllowlistFile yields empty list when first construction sees malformed JSON and empty env', () => {
+  const p = tmpFile('{not valid json');
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  assert.deepEqual(f.current(), []);
+});
+
 test('AllowlistFile reload picks up file changes', () => {
   const p = tmpFile(JSON.stringify({ wallets: ['pk1'] }));
   const f = new AllowlistFile({ path: p, envFallback: [] });

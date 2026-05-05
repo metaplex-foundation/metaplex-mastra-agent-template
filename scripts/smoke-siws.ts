@@ -28,6 +28,7 @@
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
+import { buildSiwsMessage } from '@metaplex-agent/shared';
 
 const WS_URL = process.env.WS_URL ?? 'ws://localhost:3002';
 const WS_ORIGIN = process.env.WS_ORIGIN ?? 'http://localhost:3001';
@@ -111,15 +112,17 @@ ws.on('message', (raw) => {
   console.log('<-', msg.type, msg);
 
   if (msg.type === 'auth_challenge') {
-    // Re-derive the canonical SIWS message byte-for-byte (matches buildSiwsMessage).
-    const m =
-      `Sign in to ${msg.agentName}\n` +
-      `\n` +
-      `Agent: ${msg.agentAsset ?? 'unregistered'}\n` +
-      `Network: ${msg.network}\n` +
-      `Nonce: ${msg.nonce}\n` +
-      `Issued: ${msg.issuedAt}\n` +
-      `Expires: ${msg.expiresAt}`;
+    // Use the shared canonical builder so any future format change is
+    // picked up automatically — no risk of the smoke script and the server
+    // drifting because the script reimplemented the formatting by hand.
+    const m = buildSiwsMessage({
+      agentName: String(msg.agentName),
+      agentAsset: (msg.agentAsset ?? null) as string | null,
+      network: msg.network as 'solana-mainnet' | 'solana-devnet',
+      nonce: String(msg.nonce),
+      issuedAt: String(msg.issuedAt),
+      expiresAt: String(msg.expiresAt),
+    });
     const sig = nacl.sign.detached(new TextEncoder().encode(m), kp.secretKey);
     ws.send(
       JSON.stringify({

@@ -60,7 +60,7 @@ The blank line after the greeting is intentional and load-bearing: wallets rende
 
 The hook now exposes a five-state machine. The UI should react to each state explicitly — no more "connected" or "disconnected" boolean.
 
-```
+```text
                 +-------------+
    open WS ---> | connecting  |
                 +------+------+
@@ -123,6 +123,14 @@ export function usePlexChat(profile: Profile) {
   const [authError, setAuthError] = useState<{ code: string; message: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const challengeRef = useRef<AuthChallenge | null>(null);
+  // Mirror authState into a ref so the WebSocket onmessage closure (captured
+  // when the effect mounts) sees the *current* auth state, not the value at
+  // closure-creation time. Without this, post-auth chat-plane messages would
+  // be evaluated against a stale `authState` and silently dropped.
+  const authStateRef = useRef<AuthState>('connecting');
+  useEffect(() => {
+    authStateRef.current = authState;
+  }, [authState]);
 
   // Connect — note: NO ?token=, NO subprotocol.
   useEffect(() => {
@@ -251,7 +259,7 @@ Key points to internalise:
 
 Existing share links the chat-template emits look something like:
 
-```
+```text
 https://chat.example.com/#wsUrl=wss%3A%2F%2Fagent.example.com&name=Treasury&token=abc123&network=mainnet
 ```
 

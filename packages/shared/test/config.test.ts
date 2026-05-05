@@ -84,3 +84,26 @@ test('AGENT_AUTH_MODE defaults to open in public mode without WALLET_ALLOWLIST',
   });
   assert.equal(getConfig().AGENT_AUTH_MODE, 'open');
 });
+
+test('AGENT_AUTH_MODE defaults to allowlist when only the file source has entries', async () => {
+  // Operator populates wallets.allowlist.json but leaves WALLET_ALLOWLIST env
+  // empty. The resolver must consult the file via AllowlistFile so the default
+  // resolves to 'allowlist', not 'open'.
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'config-allowlist-'));
+  const path = join(dir, 'wallets.allowlist.json');
+  writeFileSync(
+    path,
+    JSON.stringify({ wallets: ['AS3yQUgPgsEctYHJ8gJ5xZyL2Nq7kJZ5dq8Hh6BvjMq2'] }),
+  );
+
+  const { getConfig } = await load({
+    AGENT_MODE: 'public',
+    AGENT_KEYPAIR: ZERO_KEYPAIR,
+    WALLET_ALLOWLIST_PATH: path,
+    ANTHROPIC_API_KEY: 'test',
+  });
+  assert.equal(getConfig().AGENT_AUTH_MODE, 'allowlist');
+});

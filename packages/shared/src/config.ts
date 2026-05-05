@@ -4,6 +4,7 @@ import { resolve, dirname } from 'path';
 import { z } from 'zod';
 import bs58 from 'bs58';
 import { getState } from './state.js';
+import { AllowlistFile } from './allowlist-file.js';
 
 // Load .env from workspace root — walk up from cwd until we find it
 function findEnvFile(from: string): string {
@@ -166,6 +167,14 @@ const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
+  /**
+   * Explicit network identifier for the SIWS auth_challenge. Optional —
+   * when unset, the network is inferred from SOLANA_RPC_URL via substring
+   * match on `devnet`. Set explicitly when using a custom RPC endpoint
+   * whose hostname does not contain "devnet" / "mainnet" (e.g. private
+   * RPC providers or testnet).
+   */
+  SOLANA_NETWORK: z.enum(['solana-mainnet', 'solana-devnet']).optional(),
   AGENT_KEYPAIR: agentKeypairSchema,
   WEB_CHANNEL_PORT: z.preprocess(
     // Fall back to PORT (injected by Railway, Render, Fly, Heroku, etc.) when
@@ -296,13 +305,22 @@ export function getConfig(): EnvConfig {
 
     // Resolve AGENT_AUTH_MODE if not explicitly set:
     //   autonomous → owner (only the on-chain owner can drive the agent)
-    //   public + allowlist entries → allowlist (owner + listed wallets)
+    //   public + any allowlist entries (file ∪ env) → allowlist
     //   public + no allowlist → open (any SIWS-verified wallet)
+    //
+    // The file source is consulted via a one-shot AllowlistFile read (no
+    // polling) so an operator who populates wallets.allowlist.json without
+    // also setting WALLET_ALLOWLIST still gets the 'allowlist' default.
     if (!_config.AGENT_AUTH_MODE) {
       if (_config.AGENT_MODE === 'autonomous') {
         _config.AGENT_AUTH_MODE = 'owner';
       } else {
-        _config.AGENT_AUTH_MODE = _config.WALLET_ALLOWLIST.length > 0 ? 'allowlist' : 'open';
+        const merged = new AllowlistFile({
+          path: _config.WALLET_ALLOWLIST_PATH,
+          envFallback: _config.WALLET_ALLOWLIST,
+          // pollIntervalMs omitted — one-shot read, no setInterval started.
+        }).current();
+        _config.AGENT_AUTH_MODE = merged.length > 0 ? 'allowlist' : 'open';
       }
     }
 

@@ -38,6 +38,22 @@ test('WalletRateLimiter owner exemption never blocks the owner', () => {
   assert.equal(rl.allow('other'), false);
 });
 
+test('WalletRateLimiter LRU eviction directly resets the evicted entry', () => {
+  // Saturate 'a' at the cap so its `allow()` would return false until evicted.
+  // Then push 'b' and 'c' to overflow capacity, forcing 'a' out (oldest by
+  // insertion order). Re-adding 'a' must succeed — proving the limiter
+  // genuinely treats 'a' as fresh after eviction, not just tolerating it
+  // because of a generous max.
+  let now = 0;
+  const rl = new WalletRateLimiter({ max: 1, windowMs: 1000, maxKeys: 2, now: () => now });
+  assert.equal(rl.allow('a'), true);
+  assert.equal(rl.allow('a'), false); // saturated
+  assert.equal(rl.allow('b'), true);
+  assert.equal(rl.allow('c'), true); // evicts 'a' (size was 2, maxKeys 2)
+  assert.equal(rl.size(), 2);
+  assert.equal(rl.allow('a'), true); // fresh budget — proves eviction
+});
+
 test('WalletRateLimiter LRU eviction bounds memory under flood', () => {
   let now = 0;
   const rl = new WalletRateLimiter({ max: 5, windowMs: 1000, maxKeys: 3, now: () => now });

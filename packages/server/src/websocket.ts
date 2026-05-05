@@ -355,8 +355,12 @@ export class PlexChatServer {
     // --- Issue SIWS auth challenge ---
     const issued = this.nonceStore.issue();
     session.pendingNonce = issued.nonce;
+    // Prefer the explicit SOLANA_NETWORK override; fall back to URL substring
+    // matching for the common case (api.devnet.solana.com / mainnet-beta.solana.com).
+    // Custom RPC providers should set SOLANA_NETWORK explicitly to avoid
+    // misclassification (e.g. an endpoint whose hostname contains neither token).
     const network: 'solana-mainnet' | 'solana-devnet' =
-      config.SOLANA_RPC_URL.includes('devnet') ? 'solana-devnet' : 'solana-mainnet';
+      config.SOLANA_NETWORK ?? (config.SOLANA_RPC_URL.includes('devnet') ? 'solana-devnet' : 'solana-mainnet');
     const challenge: ServerAuthChallenge = {
       type: 'auth_challenge',
       nonce: issued.nonce,
@@ -545,7 +549,8 @@ export class PlexChatServer {
       typeof msg.publicKey !== 'string' ||
       typeof msg.signature !== 'string' ||
       typeof msg.message !== 'string' ||
-      !BASE58_ADDRESS_RE.test(msg.publicKey)
+      !BASE58_ADDRESS_RE.test(msg.publicKey) ||
+      !BASE58_SIGNATURE_RE.test(msg.signature)
     ) {
       return this.failAuth(session, 'message_mismatch', 'auth_response fields invalid.');
     }

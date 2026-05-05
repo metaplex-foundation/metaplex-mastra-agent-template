@@ -73,15 +73,22 @@ export class AllowlistFile {
         this.snapshot = null;
         fileWallets = [];
       } else {
-        // Malformed file or transient read error — keep last good list.
+        // Malformed file or transient read error.
         // INVARIANT: do NOT update `this.snapshot` here. Leaving the prior
         // mtime intact forces the next poll to re-attempt the read once
         // the writer finishes (a partial-write race produces a fresh
         // mtime that won't match snapshot.mtimeMs).
         console.warn(
-          `[allowlist] failed to reload ${this.opts.path}: ${err instanceof Error ? err.message : String(err)}; keeping previous list`,
+          `[allowlist] failed to reload ${this.opts.path}: ${err instanceof Error ? err.message : String(err)}; ${this.snapshot ? 'keeping previous list' : 'falling back to env only'}`,
         );
-        return;
+        if (this.snapshot) {
+          // Have a known-good prior list — preserve it untouched.
+          return;
+        }
+        // No prior snapshot (e.g. first construction with a malformed file).
+        // Fall through to merge envFallback so a typo'd JSON doesn't blank
+        // out an otherwise-valid env-supplied allowlist.
+        fileWallets = [];
       }
     }
     // Trim env fallback for the same reason as file entries.
