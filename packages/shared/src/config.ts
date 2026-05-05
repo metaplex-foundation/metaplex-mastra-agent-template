@@ -25,9 +25,14 @@ config({ path: findEnvFile(process.cwd()) });
 // ---------------------------------------------------------------------------
 // Core:
 //   AGENT_MODE, LLM_MODEL, SOLANA_RPC_URL, AGENT_KEYPAIR,
-//   WEB_CHANNEL_PORT, WEB_CHANNEL_TOKEN, ASSISTANT_NAME, JUPITER_API_KEY,
+//   WEB_CHANNEL_PORT, ASSISTANT_NAME, JUPITER_API_KEY,
 //   AGENT_FEE_SOL, TOKEN_OVERRIDE, BOOTSTRAP_WALLET,
 //   AGENT_ASSET_ADDRESS, AGENT_TOKEN_MINT
+// WebSocket auth (SIWS):
+//   AGENT_AUTH_MODE        — 'owner' | 'allowlist' | 'open' (auto-resolved)
+//   WALLET_ALLOWLIST       — comma-separated base58 pubkeys
+//   AUTH_NONCE_TTL_MS      — SIWS nonce TTL (default 60000)
+//   AUTH_HANDSHAKE_TIMEOUT_MS — handshake hard timeout (default 30000)
 // Tuning:
 //   MAX_STEPS, ENABLE_DEBUG_EVENTS, MAX_CONNECTIONS
 // Security hardening:
@@ -110,11 +115,34 @@ const agentKeypairSchema = z
     }
   }, 'AGENT_KEYPAIR must be a 64-byte base58 secret key or JSON byte array');
 
-let _weakTokenWarned = false;
-
-const webChannelTokenSchema = z
+/**
+ * WALLET_ALLOWLIST — comma-separated base58 pubkeys allowed to connect when
+ * `AGENT_AUTH_MODE=allowlist`. Empty / whitespace entries are dropped so a
+ * trailing comma or accidentally-blank `WALLET_ALLOWLIST=` is harmless. The
+ * resolved value is `string[]`, not `string`, so downstream code can iterate
+ * without re-parsing.
+ *
+ * Note: this schema does NOT base58-validate entries — that's done at use-site
+ * (allowlist resolver) so a single typo in the env doesn't bring the server
+ * down on boot. Invalid entries simply never match an incoming public key.
+ */
+const walletAllowlistSchema = z
   .string()
-  .min(32, 'WEB_CHANNEL_TOKEN must be at least 32 characters; use `openssl rand -hex 24` to generate a strong token');
+  .default('')
+  .transform((raw) =>
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+
+/**
+ * AGENT_AUTH_MODE — explicit override of the auth tier policy. When unset, the
+ * mode is auto-resolved from AGENT_MODE + WALLET_ALLOWLIST in `getConfig()`:
+ *   - autonomous → 'owner'
+ *   - public     → 'allowlist' if WALLET_ALLOWLIST has entries, else 'open'
+ */
+const authModeSchema = z.enum(['owner', 'allowlist', 'open']).optional();
 
 /**
  * WS_ALLOWED_ORIGINS — comma-separated list of allowed Origin header values.
@@ -142,7 +170,15 @@ const envSchema = z.object({
     (v) => (v === undefined || v === '' ? process.env.PORT : v),
     z.coerce.number().default(3002),
   ),
-  WEB_CHANNEL_TOKEN: webChannelTokenSchema,
+  // --- WebSocket auth (SIWS) ---
+  /** Tier policy: 'owner' | 'allowlist' | 'open'. Auto-resolved if unset. */
+  AGENT_AUTH_MODE: authModeSchema,
+  /** Comma-separated base58 pubkeys allowed in 'allowlist' tier. */
+  WALLET_ALLOWLIST: walletAllowlistSchema,
+  /** TTL of issued SIWS handshake nonces, in ms. */
+  AUTH_NONCE_TTL_MS: z.coerce.number().int().min(5_000).max(600_000).default(60_000),
+  /** Hard cap on how long the server waits for a SIWS handshake to complete. */
+  AUTH_HANDSHAKE_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
   ASSISTANT_NAME: z.string().default('Agent'),
   JUPITER_API_KEY: optional(z.string().min(1)),
   AGENT_FEE_SOL: z.coerce.number().min(0).max(1).default(0.001),
@@ -243,12 +279,16 @@ export function getConfig(): EnvConfig {
     // LLM provider key presence check
     validateLlmApiKey(_config);
 
-    // Soft warning for weak but valid-length tokens
-    if (!_weakTokenWarned && _config.WEB_CHANNEL_TOKEN.length < 32) {
-      console.warn(
-        'WEB_CHANNEL_TOKEN is weak (< 32 chars); use `openssl rand -hex 24` for production',
-      );
-      _weakTokenWarned = true;
+    // Resolve AGENT_AUTH_MODE if not explicitly set:
+    //   autonomous → owner (only the on-chain owner can drive the agent)
+    //   public + allowlist entries → allowlist (owner + listed wallets)
+    //   public + no allowlist → open (any SIWS-verified wallet)
+    if (!_config.AGENT_AUTH_MODE) {
+      if (_config.AGENT_MODE === 'autonomous') {
+        _config.AGENT_AUTH_MODE = 'owner';
+      } else {
+        _config.AGENT_AUTH_MODE = _config.WALLET_ALLOWLIST.length > 0 ? 'allowlist' : 'open';
+      }
     }
 
     const state = getState();
