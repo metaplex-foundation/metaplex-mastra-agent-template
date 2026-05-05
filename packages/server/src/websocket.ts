@@ -13,6 +13,7 @@ import {
   NonceStore,
   isAuthorized,
   AllowlistFile,
+  WalletRateLimiter,
   type ServerMessage,
   type TransactionSender,
   type AgentContext,
@@ -79,6 +80,7 @@ export class PlexChatServer {
   private nonceSweepInterval: ReturnType<typeof setInterval> | null = null;
   private nonceStore: NonceStore;
   private allowlistFile: AllowlistFile;
+  private walletLimiter: WalletRateLimiter;
   private stopped = false;
   // Resolves once start() has finished its async preflight + owner-resolution
   // phase. Lets the orchestrator (index.ts) wait before booting the worker
@@ -102,6 +104,15 @@ export class PlexChatServer {
       path: 'wallets.allowlist.json',
       envFallback: config.WALLET_ALLOWLIST,
       pollIntervalMs: 5_000,
+    });
+    // Per-wallet sliding-window rate limiter. Owner exemption is initialized
+    // to null and updated in start() once resolveOwner() resolves — the
+    // constructor is sync but owner resolution is async.
+    this.walletLimiter = new WalletRateLimiter({
+      max: config.WALLET_RATE_LIMIT_MAX,
+      windowMs: config.WALLET_RATE_LIMIT_WINDOW_MS,
+      maxKeys: config.WALLET_RATE_LIMIT_MAX_KEYS,
+      ownerExempt: null,
     });
   }
 
@@ -222,6 +233,10 @@ export class PlexChatServer {
 
       // Resolve owner at startup
       this.ownerWallet = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
+      // Push the resolved owner into the per-wallet rate limiter so the
+      // owner is unconditionally allowed. If resolution failed (null), the
+      // limiter remains in the no-exemption state — fail-closed is correct.
+      this.walletLimiter.setOwnerExempt(this.ownerWallet);
       if (this.ownerWallet) {
         console.log(`Agent owner: ${this.ownerWallet}`);
       } else if (config.AGENT_MODE === 'autonomous') {
@@ -444,7 +459,24 @@ export class PlexChatServer {
       return;
     }
 
-    // Rate limiting (post-auth only)
+    // Per-wallet rate limit (post-auth, BEFORE per-session). Aggregates across
+    // all of a wallet's concurrent sessions, so opening N parallel sockets
+    // doesn't multiply the effective budget.
+    if (session.walletAddress && !this.walletLimiter.allow(session.walletAddress)) {
+      this.logAuthFailure('wallet_rate_limit', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+      });
+      session.send({
+        type: 'error',
+        error: 'Per-wallet rate limit exceeded.',
+        code: 'RATE_LIMIT',
+      });
+      return;
+    }
+
+    // Per-session rate limit (post-auth only). Catches burst behavior on a
+    // single connection even when the wallet's aggregate budget is fine.
     if (!session.rateLimiter.allow()) {
       this.logAuthFailure('rate_limit', { sessionId: session.id });
       session.send({ type: 'error', error: 'Rate limit exceeded. Please slow down.', code: 'RATE_LIMIT' });

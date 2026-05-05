@@ -43,6 +43,9 @@ config({ path: findEnvFile(process.cwd()) });
 //   MAX_MESSAGE_CONTENT    — per-message content byte cap (M3, default 8000)
 //   MAX_RPC_TIME_BUDGET_MS — per-turn wall-clock budget (M5, default 60000)
 //   LOG_AUTH_FAILURES      — log token/origin/owner/rate-limit denials (L6, default true)
+//   WALLET_RATE_LIMIT_MAX  — per-wallet sliding-window event cap (default 60)
+//   WALLET_RATE_LIMIT_WINDOW_MS — per-wallet rate-limit window length (default 60000)
+//   WALLET_RATE_LIMIT_MAX_KEYS — LRU cap on tracked wallets (default 10000)
 // LLM API keys (at least one must match the LLM_MODEL provider prefix):
 //   ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY
 // ---------------------------------------------------------------------------
@@ -207,6 +210,12 @@ const envSchema = z.object({
     (v) => v === undefined ? true : v === 'true' || v === '1',
     z.boolean().default(true),
   ),
+  /** Per-wallet rate limit: max messages per WALLET_RATE_LIMIT_WINDOW_MS, aggregated across that wallet's concurrent sessions. */
+  WALLET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
+  /** Sliding-window length for the per-wallet rate limit, in ms. */
+  WALLET_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+  /** LRU cap on tracked wallets in the per-wallet rate limiter. */
+  WALLET_RATE_LIMIT_MAX_KEYS: z.coerce.number().int().min(100).default(10_000),
   // --- Autonomous-mode worker loop ---
   /** Sleep between ticks, in ms. Tick body runs to completion before sleeping. (autonomous mode only) */
   TICK_INTERVAL_MS: z.coerce.number().int().min(100).default(300000),
