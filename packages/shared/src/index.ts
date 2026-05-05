@@ -14,6 +14,7 @@ export * from './context.js';
 export * from './siws.js';
 export * from './nonce-store.js';
 export * from './allowlist.js';
+export * from './allowlist-file.js';
 // Explicit re-exports from tool-result.js to avoid colliding with the
 // `ToolErrorCode` name already exported from `error-codes.js`.
 // Consumers that want the v2 tool-result taxonomy (includes 'INTEGRITY')

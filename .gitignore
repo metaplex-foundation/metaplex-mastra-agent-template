@@ -9,4 +9,5 @@ dist/
 .claude/
 agent-state.json
 .next/
+wallets.allowlist.json
 
