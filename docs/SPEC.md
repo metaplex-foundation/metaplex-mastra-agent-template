@@ -246,7 +246,7 @@ Issued: {issuedAt}
 Expires: {expiresAt}
 ```
 
-**Server enforcement (v1):** the server requires the signed `message` to contain `Nonce: <issuedNonce>` (else `message_mismatch`) and to pass Ed25519 verification, but does not currently byte-compare the full canonical string. The "wallet displays exactly what they sign" property is the load-bearing defense against cross-agent / cross-chain replay; nonce single-use + TTL plus the wallet UI prompt are sufficient for v1. A future v2 refinement may store `(agentAsset, network, issuedAt, expiresAt)` alongside the nonce and require byte-for-byte equality.
+**Server enforcement.** The challenge fields emitted to a session are snapshotted on the per-session state (`pendingChallenge: SiwsParams`). On `auth_response` the server rebuilds the canonical string via `buildSiwsMessage(pendingChallenge)` and compares it byte-for-byte against `msg.message` before signature verification — any mismatch (asset, network, whitespace, field substitution) yields `message_mismatch`. This binds each signature to the exact agent and network the wallet displayed in its signing prompt, giving strict cross-agent / cross-chain replay protection on top of the single-use nonce + TTL defenses.
 
 #### Authorization tiers
 

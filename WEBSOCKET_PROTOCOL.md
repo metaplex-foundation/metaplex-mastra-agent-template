@@ -87,7 +87,7 @@ Expires: {expiresAt}
 
 The blank line after the greeting is intentional — wallets like Phantom and Solflare display this string verbatim in the signing prompt, and the formatting matters. Including `agentAsset` and `network` is what the user sees and approves, so a phishing UI cannot trick the user into signing a message that targets a different agent without it being visible in the wallet popup.
 
-**Server enforcement (v1):** the server only requires the signed message to contain `Nonce: <issuedNonce>` and pass Ed25519 verification against the supplied public key. It does not currently re-derive the canonical message and byte-compare it. The "wallet displays exactly what they sign" property is therefore the load-bearing defense against cross-agent / cross-chain replay — the server's nonce-only check is sufficient because each nonce is single-use, agent-scoped, and TTL-bounded. A future v2 refinement may store the issued challenge parameters with the nonce and tighten the check to byte-for-byte equality.
+**Server enforcement.** The server snapshots the challenge fields it emitted (agent name, agent asset, network, nonce, issuedAt, expiresAt) on the per-session state, then on `auth_response` rebuilds the canonical string via `buildSiwsMessage` and compares it byte-for-byte against the client-supplied `message` before signature verification. Any difference — whitespace, missing field, substituted asset, mismatched network — yields `message_mismatch` and a `4001` close. This is the strict cross-agent / cross-chain replay defense: a signature for one agent cannot be carried over to another even if the attacker forwards it within the nonce TTL.
 
 If the agent has not yet been registered on-chain, `agentAsset` is `null` in the challenge; the client substitutes the literal string `unregistered` in the canonical message.
 
@@ -106,7 +106,7 @@ The current mode is reported in the `auth_challenge` so clients can inform the u
 #### Server Verification (fail-fast order)
 
 1. Nonce exists in the server's nonce store and has not expired → else `nonce_invalid` / `nonce_expired`.
-2. The `message` field in `auth_response` contains the issued nonce → else `message_mismatch`.
+2. The `message` field equals the canonical string the server reconstructs from the stored challenge fields, byte-for-byte → else `message_mismatch`.
 3. Ed25519 verification of `(message, signature, publicKey)` succeeds → else `signature_invalid`.
 4. `publicKey` is allowed by the current authorization tier → else `not_authorized`.
 

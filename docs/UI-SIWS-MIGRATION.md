@@ -224,14 +224,19 @@ export function usePlexChat(profile: Profile) {
       );
       // Stay in 'authenticating' until we receive 'authenticated' or 'auth_error'.
     } catch (err) {
-      // User rejected the signing prompt, or wallet threw.
+      // User rejected the signing prompt, or wallet threw. Free the server
+      // slot immediately and drop the cached challenge so a "Try again"
+      // click triggers a brand-new connection (fresh nonce, no stale state).
+      // Leaving the socket open consumes a MAX_CONNECTIONS slot for the
+      // remainder of AUTH_HANDSHAKE_TIMEOUT_MS, and the cached challenge is
+      // single-use so any retry must come from a fresh handshake regardless.
       setAuthError({
         code: 'user_rejected',
         message: err instanceof Error ? err.message : 'Signing was cancelled.',
       });
       setAuthState('failed');
-      // Don't close the socket here — let the server's nonce expire naturally,
-      // OR call ws.close() if you want to free the slot immediately.
+      challengeRef.current = null;
+      wsRef.current?.close(1000, 'user cancelled signing');
     }
   }, [wallet]);
 
@@ -251,7 +256,7 @@ Key points to internalise:
 
 2. **Encoding.** `new TextEncoder().encode(canonical)` is the bytes the wallet signs. The signature returned by wallet-adapter is already a `Uint8Array`; base58-encode it for the wire with `bs58.encode`. The server base58-decodes and feeds it to `nacl.sign.detached.verify` against the same UTF-8 bytes — so an exact match between what you sign and what you put in `auth_response.message` is required.
 
-3. **`message` field in `auth_response` must be the exact canonical string.** The server re-checks that the issued nonce appears inside it before verifying the signature — if you trim, normalise newlines, or lose the blank line, you'll get `message_mismatch`.
+3. **`message` field in `auth_response` must be the exact canonical string.** The server reconstructs the canonical bytes from the challenge it issued and compares them byte-for-byte — if you trim, normalise newlines, lose the blank line, or substitute any field, you'll get `message_mismatch`. Always build the message via the shared `buildSiwsMessage` helper rather than hand-formatting.
 
 4. **Close code `4001` is terminal.** Never call `scheduleReconnect()` from that branch.
 
@@ -272,9 +277,17 @@ Same pattern for localStorage: `Profile` previously had `{ name, wsUrl, token, p
 
 ```ts
 function readProfile(raw: string): Profile {
-  const parsed = JSON.parse(raw);
-  if ('token' in parsed) {
-    delete parsed.token; // legacy field — ignored under v2
+  const parsed: unknown = JSON.parse(raw);
+  // `JSON.parse` can return null, primitives, or arrays — the `'token' in x`
+  // check throws a TypeError on any of those. Guard before reaching for it
+  // so a corrupted localStorage entry surfaces as a `ProfileSchema.parse`
+  // error instead of an unhandled exception.
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    if ('token' in obj) {
+      delete obj.token; // legacy field — ignored under v2
+    }
+    return ProfileSchema.parse(obj);
   }
   return ProfileSchema.parse(parsed);
 }

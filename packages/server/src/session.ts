@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
-import type { ServerMessage } from '@metaplex-agent/shared';
+import type { ServerMessage, SiwsParams } from '@metaplex-agent/shared';
 
 /**
  * Per-WebSocket-connection state.
@@ -45,6 +45,13 @@ export class Session {
   walletAddress: string | null = null;
   isOwnerVerified = false;
   pendingNonce: string | null = null;
+  /**
+   * Snapshot of the SIWS challenge fields the server emitted to this session.
+   * Used to byte-for-byte reconstruct the canonical message during
+   * `auth_response` verification — defends against signed-message tampering
+   * even when the client-provided message contains the issued nonce.
+   */
+  pendingChallenge: SiwsParams | null = null;
   authTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Conversation
@@ -103,6 +110,8 @@ export class Session {
       clearTimeout(this.authTimeout);
       this.authTimeout = null;
     }
+    this.pendingNonce = null;
+    this.pendingChallenge = null;
     if (this.currentAbortController) {
       this.currentAbortController.abort();
       this.currentAbortController = null;

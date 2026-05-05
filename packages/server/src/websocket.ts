@@ -9,11 +9,13 @@ import {
   createUmi,
   getAgentKeypairPublicKey,
   getAgentPda,
+  buildSiwsMessage,
   verifySiwsSignature,
   NonceStore,
   isAuthorized,
   AllowlistFile,
   WalletRateLimiter,
+  type SiwsParams,
   type ServerMessage,
   type TransactionSender,
   type AgentContext,
@@ -361,13 +363,26 @@ export class PlexChatServer {
     // misclassification (e.g. an endpoint whose hostname contains neither token).
     const network: 'solana-mainnet' | 'solana-devnet' =
       config.SOLANA_NETWORK ?? (config.SOLANA_RPC_URL.includes('devnet') ? 'solana-devnet' : 'solana-mainnet');
+    // Snapshot the canonical-message inputs so we can rebuild the exact bytes
+    // the wallet was asked to sign during auth_response verification. Storing
+    // a per-session copy means the comparison is immune to mid-flight config
+    // changes (asset address, assistant name, etc).
+    const challengeSnapshot: SiwsParams = {
+      agentName: config.ASSISTANT_NAME,
+      agentAsset: config.AGENT_ASSET_ADDRESS ?? null,
+      network,
+      nonce: issued.nonce,
+      issuedAt: issued.issuedAt,
+      expiresAt: issued.expiresAt,
+    };
+    session.pendingChallenge = challengeSnapshot;
     const challenge: ServerAuthChallenge = {
       type: 'auth_challenge',
       nonce: issued.nonce,
       issuedAt: issued.issuedAt,
       expiresAt: issued.expiresAt,
-      agentName: config.ASSISTANT_NAME,
-      agentAsset: config.AGENT_ASSET_ADDRESS ?? null,
+      agentName: challengeSnapshot.agentName,
+      agentAsset: challengeSnapshot.agentAsset,
       network,
       // AGENT_AUTH_MODE is always populated after getConfig()'s post-parse
       // resolution — the schema marks it optional only because the env-var
@@ -545,6 +560,16 @@ export class PlexChatServer {
 
     // Defensive shape validation — TS says this is a ClientAuthResponse, but
     // the data was just JSON.parsed from an attacker-controlled string.
+    // Disarm the handshake timeout the moment we observe an auth_response.
+    // Async verification work (resolveOwner RPC, signature verify) can take
+    // longer than AUTH_HANDSHAKE_TIMEOUT_MS on a slow network, and we don't
+    // want a slow but valid handshake to be racing the timer. Verification
+    // outcomes (success or failAuth) take over from here.
+    if (session.authTimeout) {
+      clearTimeout(session.authTimeout);
+      session.authTimeout = null;
+    }
+
     if (
       typeof msg.publicKey !== 'string' ||
       typeof msg.signature !== 'string' ||
@@ -562,19 +587,27 @@ export class PlexChatServer {
       return this.failAuth(session, 'nonce_invalid', 'No pending nonce.');
     }
     const consumedNonce = session.pendingNonce;
+    const consumedChallenge = session.pendingChallenge;
     session.pendingNonce = null;
+    session.pendingChallenge = null;
     const consumeResult = this.nonceStore.consume(consumedNonce);
     if (!consumeResult.ok) {
       return this.failAuth(session, consumeResult.reason, 'Nonce rejected.');
     }
+    if (!consumedChallenge) {
+      // Defensive: pendingNonce was set but pendingChallenge wasn't. Should
+      // never happen — both are populated together in handleConnection.
+      return this.failAuth(session, 'nonce_invalid', 'Missing challenge metadata.');
+    }
 
-    // Require the signed message to literally contain the issued nonce. We
-    // don't store issuedAt/expiresAt with the nonce, so we use the nonce
-    // string as a tamper-resistant tag — combined with the signature check,
-    // a client can't substitute their own message text without invalidating
-    // either the nonce match or the signature.
-    if (!msg.message.includes(`Nonce: ${consumedNonce}`)) {
-      return this.failAuth(session, 'message_mismatch', 'Signed message does not contain expected nonce.');
+    // Reconstruct the exact bytes the wallet was supposed to sign and require
+    // byte-for-byte equality. This binds the signature to the agent identity
+    // and network the wallet displayed in its signing prompt — a malicious
+    // client cannot smuggle an agent-substituted or chain-substituted payload
+    // past the verifier even when the nonce string is present in the message.
+    const canonical = buildSiwsMessage(consumedChallenge);
+    if (msg.message !== canonical) {
+      return this.failAuth(session, 'message_mismatch', 'Signed message does not match canonical form.');
     }
 
     // Verify the Ed25519 signature.
@@ -604,11 +637,13 @@ export class PlexChatServer {
     session.authStatus = 'authenticated';
     session.walletAddress = msg.publicKey;
     session.isOwnerVerified = owner !== null && msg.publicKey === owner;
-    if (session.authTimeout) {
-      clearTimeout(session.authTimeout);
-      session.authTimeout = null;
+    // Owner can change at runtime (post-registration, ownership transfer).
+    // Keep the per-wallet limiter's exemption in sync with the resolver so a
+    // freshly-recognized owner doesn't get rate-limited despite isOwner=true.
+    if (owner !== this.ownerWallet) {
+      this.ownerWallet = owner;
+      this.walletLimiter.setOwnerExempt(owner);
     }
-    this.ownerWallet = owner;
 
     session.send({
       type: 'authenticated',
