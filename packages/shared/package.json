@@ -9,7 +9,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx './test/**/*.test.ts'"
+    "test": "node --test --import tsx"
   },
   "dependencies": {
     "@metaplex-foundation/genesis": "^0.35.0",
