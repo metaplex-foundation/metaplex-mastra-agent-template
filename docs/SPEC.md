@@ -725,7 +725,7 @@ All configuration is via environment variables, validated at startup with Zod sc
 | `MAX_SLIPPAGE_BPS` | `500` | Upper cap on `slippageBps` accepted by swap/buyback/sell tools |
 | `MAX_PRICE_IMPACT_PCT` | `2.0` | Upper cap on Jupiter `priceImpactPct` accepted before a quote is rejected |
 | `OWNER_CACHE_TTL_MS` | `300000` | TTL for cached on-chain owner lookups (5 minutes) |
-| `WS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:3000` | Comma-separated list of allowed WebSocket `Origin` headers. Rejects cross-site connections (CSWSH protection). Missing/undefined origins (curl, wscat) are allowed with a warning. |
+| `WS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:3000,https://metaplex.chat,https://www.metaplex.chat` | Comma-separated list of allowed WebSocket `Origin` headers. Rejects cross-site connections (CSWSH protection). Missing/undefined origins (curl, wscat) are allowed with a warning. |
 | `MAX_MESSAGE_CONTENT` | `8000` | Per-message character cap on inbound chat `content`. Rejects oversized messages before they enter conversation history. |
 | `MAX_RPC_TIME_BUDGET_MS` | `60000` | Per-message cumulative RPC wall-clock budget. When exceeded, the current LLM turn is aborted. Bounds runaway tool loops. |
 | `LOG_AUTH_FAILURES` | `true` | Emit structured `console.warn` logs on token mismatch, origin rejection, autonomous-gate denial, and rate-limit breach. |

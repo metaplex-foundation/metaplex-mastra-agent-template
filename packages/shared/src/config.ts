@@ -155,7 +155,7 @@ const authModeSchema = z.enum(['owner', 'allowlist', 'open']).optional();
  */
 const wsAllowedOriginsSchema = z
   .string()
-  .default('http://localhost:3001,http://localhost:3000')
+  .default('http://localhost:3001,http://localhost:3000,https://metaplex.chat,https://www.metaplex.chat')
   .transform((raw) =>
     raw
       .split(',')
