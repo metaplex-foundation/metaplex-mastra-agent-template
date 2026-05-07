@@ -12,7 +12,7 @@ This document is the canonical spec: it should contain enough detail to reconstr
 
 ### 1.1 What Is This
 
-The Metaplex Agent Template is a full-stack starter kit for building AI agents on Solana that register on the [Metaplex Agent Registry](https://agents.metaplex.com). It provides a ready-to-run agent with blockchain tools, a real-time WebSocket communication layer, and a test UI -- designed to be forked and extended.
+The Metaplex Agent Template is a full-stack starter kit for building AI agents on Solana that register on the [Metaplex Agent Registry](https://metaplex.com/agents). It provides a ready-to-run agent with blockchain tools, a real-time WebSocket communication layer, and a test UI -- designed to be forked and extended.
 
 ### 1.2 Problem Statement
 
