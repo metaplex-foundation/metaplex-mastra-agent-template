@@ -2,7 +2,7 @@
 
 > Build and launch a Solana AI agent in five minutes. SIWS wallet auth, on-chain identity via the [Metaplex Agent Registry](https://agents.metaplex.com), Mastra + Umi inside, no shared secrets to manage.
 
-[![Try the demo](https://img.shields.io/badge/Try%20the%20demo-agents.metaplex.com-7c3aed)](https://agents.metaplex.com)
+[![Try the demo](https://img.shields.io/badge/Try%20the%20metaplex.com/agents-7c3aed)](https://metaplex.com/agents)
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2Fmetaplex-foundation%2Fmetaplex-mastra-agent-template&envs=AGENT_MODE,AGENT_KEYPAIR,WALLET_ALLOWLIST,SOLANA_RPC_URL,ANTHROPIC_API_KEY)
 
 > **Demo:** screencast and a hosted public-tier agent are coming soon — the badge above will go live as part of the agents.metaplex.com gallery launch.
