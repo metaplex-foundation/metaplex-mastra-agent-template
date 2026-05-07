@@ -65,6 +65,44 @@ class RateLimiter implements SimpleRateLimiter {
 }
 
 /**
+ * Build a chat-template share link that pre-fills the agent profile, so the
+ * operator can click straight from the server's startup log into a working
+ * chat session without going through the profile-setup step.
+ *
+ * Format mirrors `encodeProfileToHash` in
+ * metaplex-agent-chat-template/src/lib/share-link.ts — keep them in sync.
+ */
+function buildTestUiUrl(args: {
+  uiOrigin: string;
+  wsPort: number;
+  rpcUrl: string;
+  name: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set('ws', `ws://localhost:${args.wsPort}`);
+  const preset = inferRpcPreset(args.rpcUrl);
+  params.set('preset', preset);
+  if (preset === 'custom') {
+    params.set('rpc', args.rpcUrl);
+    params.set('cluster', 'devnet');
+  }
+  params.set('name', args.name);
+  return `${args.uiOrigin}/#${params.toString()}`;
+}
+
+function inferRpcPreset(rpcUrl: string): 'mainnet' | 'devnet' | 'localnet' | 'custom' {
+  try {
+    const url = new URL(rpcUrl);
+    if (url.hostname === 'api.mainnet-beta.solana.com') return 'mainnet';
+    if (url.hostname === 'api.devnet.solana.com') return 'devnet';
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return 'localnet';
+    return 'custom';
+  } catch {
+    return 'custom';
+  }
+}
+
+/**
  * PlexChat WebSocket Server
  *
  * Implements the PlexChat protocol for real-time communication between
@@ -232,7 +270,17 @@ export class PlexChatServer {
       console.log(`Agent mode: ${config.AGENT_MODE}`);
       console.log(`Agent name: ${config.ASSISTANT_NAME}`);
       console.log(`RPC: ${config.SOLANA_RPC_URL}`);
-      console.log('Test UI (if running): http://localhost:3001');
+      // The chat template's `next dev` hardcodes :3001. If the operator
+      // overrides that port locally, this URL won't match — but neither
+      // would the previous bare `http://localhost:3001`, so we're not
+      // making it worse.
+      const testUiUrl = buildTestUiUrl({
+        uiOrigin: 'http://localhost:3001',
+        wsPort: port,
+        rpcUrl: config.SOLANA_RPC_URL,
+        name: config.ASSISTANT_NAME,
+      });
+      console.log(`Test UI (if running): ${testUiUrl}`);
 
       // Resolve owner at startup
       this.ownerWallet = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);

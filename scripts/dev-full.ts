@@ -15,7 +15,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, statSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +107,34 @@ function ensureChatTemplate(): void {
   }
 }
 
+/**
+ * Build a chat-template share link that pre-fills the agent profile, so the
+ * operator can click straight from the terminal into a working chat session
+ * without going through the profile-setup step.
+ *
+ * Format mirrors `encodeProfileToHash` in
+ * metaplex-agent-chat-template/src/lib/share-link.ts — keep them in sync.
+ * Defaults assume the standard `pnpm dev:full` ports:
+ *   - chat UI: 3001 (hardcoded by metaplex-agent-chat-template's `next dev`)
+ *   - WS:      3002 (WEB_CHANNEL_PORT, overridable in .env)
+ */
+function printShareLink(): void {
+  const wsPort = process.env.WEB_CHANNEL_PORT ?? '3002';
+  const uiPort = '3001';
+  const params = new URLSearchParams();
+  params.set('ws', `ws://localhost:${wsPort}`);
+  params.set('preset', 'devnet');
+  params.set('name', basename(ROOT));
+  const link = `http://localhost:${uiPort}/#${params.toString()}`;
+  const bar = '─'.repeat(72);
+  console.log('');
+  console.log(`[dev:full] ${bar}`);
+  console.log('[dev:full]   Open in your browser to connect (skips profile setup):');
+  console.log(`[dev:full]     ${link}`);
+  console.log(`[dev:full] ${bar}`);
+  console.log('');
+}
+
 function run(): void {
   // Use the locally-installed concurrently binary so users don't need it
   // globally. spawn() with shell: true so the binary resolves via PATH that
@@ -124,6 +152,14 @@ function run(): void {
     ],
     { stdio: 'inherit', cwd: ROOT, shell: false },
   );
+  // Print the share link a few seconds after spawning — by then the agent
+  // server and Next.js dev server have flushed their initial "ready" logs,
+  // so the link lands at the bottom of the current terminal viewport rather
+  // than above the boot output where the operator would have to scroll up.
+  // Slight further delay helps when machines are slow.
+  const linkTimer = setTimeout(printShareLink, 4000);
+  child.on('exit', () => clearTimeout(linkTimer));
+
   child.on('exit', (code, signal) => {
     if (signal) {
       // Child died from a signal — propagate it to ourselves so any parent
