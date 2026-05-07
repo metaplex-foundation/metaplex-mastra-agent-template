@@ -164,7 +164,7 @@ All variables are loaded from `.env` at the workspace root and validated with Zo
 | `MAX_SLIPPAGE_BPS` | `500` | Upper cap on `slippageBps` for swap tools |
 | `MAX_PRICE_IMPACT_PCT` | `2.0` | Upper cap on Jupiter `priceImpactPct` |
 | `OWNER_CACHE_TTL_MS` | `300000` | TTL for cached on-chain owner lookups |
-| `WS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:3000` | Comma-separated allowed `Origin` list for WS handshakes (CSWSH protection) |
+| `WS_ALLOWED_ORIGINS` | `http://localhost:3001,http://localhost:3000,https://metaplex.chat,https://www.metaplex.chat` | Comma-separated allowed `Origin` list for WS handshakes (CSWSH protection) |
 | `MAX_MESSAGE_CONTENT` | `8000` | Per-message character cap on inbound chat `content` |
 | `MAX_RPC_TIME_BUDGET_MS` | `60000` | Per-message cumulative RPC wall-clock budget before abort |
 | `LOG_AUTH_FAILURES` | `true` | Emit `console.warn` on token mismatch, origin rejection, autonomous-gate denial, rate-limit breach |

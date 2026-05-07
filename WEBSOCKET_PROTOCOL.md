@@ -33,7 +33,7 @@ The client opens a plain WebSocket connection — **no `?token=` query param, no
 
 ### Origin Validation
 
-The server checks `Origin` against the `WS_ALLOWED_ORIGINS` env var (comma-separated, default `http://localhost:3001,http://localhost:3000`). Cross-site connections from disallowed origins are rejected during the handshake (CSWSH protection). Missing/undefined origins (curl, wscat) are allowed with a server-side warning.
+The server checks `Origin` against the `WS_ALLOWED_ORIGINS` env var (comma-separated, default `http://localhost:3001,http://localhost:3000,https://metaplex.chat,https://www.metaplex.chat`). Cross-site connections from disallowed origins are rejected during the handshake (CSWSH protection). Missing/undefined origins (curl, wscat) are allowed with a server-side warning.
 
 ### Authentication: Sign-In-With-Solana (SIWS)
 
