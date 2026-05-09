@@ -12,6 +12,7 @@ import {
   getConfig,
   info,
   ok,
+  printRegistrationBanner,
   setState,
   toToolError,
   updateConfigFromState,
@@ -126,6 +127,16 @@ export const launchToken = createTool({
 
       setState({ agentTokenMint: result.mintAddress });
       updateConfigFromState();
+
+      // Same persistence footgun as register-agent: ephemeral PaaS
+      // filesystems lose agent-state.json on redeploy unless the operator
+      // promotes the mint address to env. Loud banner with platform-aware
+      // instructions.
+      printRegistrationBanner({
+        kind: 'token',
+        address: result.mintAddress,
+        envKey: 'AGENT_TOKEN_MINT',
+      });
 
       return ok({
         mintAddress: result.mintAddress,

@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export interface AllowlistFileOptions {
   path: string;
@@ -104,5 +105,85 @@ export class AllowlistFile {
 
   current(): readonly string[] {
     return this.merged;
+  }
+
+  /** File path the allowlist is read from / written to (absolute or relative as supplied). */
+  get path(): string {
+    return this.opts.path;
+  }
+
+  /** Wallets supplied via the env-var fallback. Read-only from callers. */
+  get envWallets(): readonly string[] {
+    return this.opts.envFallback;
+  }
+
+  /**
+   * Wallets currently in the FILE (not env). Reads cached snapshot — call
+   * `reload()` first if a hot-edit needs to be picked up. The split is
+   * intentional: only the file portion is mutable from the admin panel.
+   * Env-supplied entries can only be changed by editing .env + restart.
+   */
+  fileWallets(): readonly string[] {
+    return this.snapshot?.wallets ?? [];
+  }
+
+  /**
+   * Add a base58 pubkey to the file. Idempotent — adding an existing
+   * entry is a no-op (returns false). Returns true when the file was
+   * actually updated. Throws on a write failure (caller surfaces as a
+   * targeted protocol error).
+   *
+   * Caller is responsible for validating that `pubkey` is a well-formed
+   * base58 32-byte address. We trim defensively but do not parse.
+   */
+  addWallet(pubkey: string): boolean {
+    const trimmed = pubkey.trim();
+    if (trimmed.length === 0) return false;
+    const current = this.snapshot?.wallets ?? [];
+    if (current.includes(trimmed)) return false;
+    const next = [...current, trimmed];
+    this.writeFile(next);
+    this.reload();
+    return true;
+  }
+
+  /**
+   * Remove a base58 pubkey from the file. Idempotent — removing a missing
+   * entry is a no-op (returns false). Returns true when the file was
+   * actually updated.
+   *
+   * NB: a wallet that's also in `envFallback` will continue to be allowed
+   * after removal — only the file portion is mutable. The protocol layer
+   * tells the operator about that via the `env_only` error code when
+   * trying to remove an env-supplied entry, so they don't think the
+   * removal failed silently.
+   */
+  removeWallet(pubkey: string): boolean {
+    const trimmed = pubkey.trim();
+    const current = this.snapshot?.wallets ?? [];
+    if (!current.includes(trimmed)) return false;
+    const next = current.filter((w) => w !== trimmed);
+    this.writeFile(next);
+    this.reload();
+    return true;
+  }
+
+  /**
+   * Atomic write — tmp file + rename, mode 0600. Mirrors agent-state.json's
+   * pattern. We don't preserve any extra keys in the JSON (e.g. operator
+   * comments) — the file shape is `{ "wallets": string[] }` and that's it.
+   */
+  private writeFile(wallets: string[]): void {
+    const dir = dirname(this.opts.path);
+    // Defensive: refuse to write if the directory doesn't exist. Otherwise
+    // the operator could end up with a file in process.cwd() they didn't
+    // expect (e.g. on a misconfigured WALLET_ALLOWLIST_PATH).
+    if (!existsSync(dir)) {
+      throw new Error(`allowlist directory does not exist: ${dir}`);
+    }
+    const tmpPath = this.opts.path + '.tmp';
+    const payload = JSON.stringify({ wallets }, null, 2) + '\n';
+    writeFileSync(tmpPath, payload, { mode: 0o600 });
+    renameSync(tmpPath, this.opts.path);
   }
 }

@@ -1,0 +1,40 @@
+# =============================================================================
+# Metaplex Agent Template — agent.config.yaml (optional overlay)
+#
+# Copy to `agent.config.yaml` (`cp agent.config.yaml.example agent.config.yaml`)
+# and edit. This file is OPTIONAL — without it, the agent reads everything from
+# .env and falls back to built-in defaults.
+#
+# Layering: process.env > agent.config.yaml > schema defaults.
+#   - Anything set in .env wins (lets you override per deploy without editing yaml).
+#   - Missing or empty env vars get filled from this file.
+#   - Anything missing here falls back to the built-in default.
+#
+# Secrets (AGENT_KEYPAIR, ANTHROPIC_API_KEY, etc.) intentionally cannot be
+# set here — they belong in .env (gitignored) only.
+# =============================================================================
+
+# Display name for the agent. Becomes ASSISTANT_NAME in the env.
+# agent_name: My Agent
+
+# Persona slug. Bundled options:
+#   default, token-launch-concierge, wallet-cleanup-bot, treasury-rebalancer.
+# Add custom personas in packages/core/src/personas/ and reference here.
+# persona: default
+
+# Worker-loop tunables (autonomous mode only — ignored in public mode).
+# worker:
+#   # Sleep between ticks, in ms. Default 300000 (5 min).
+#   interval_ms: 300000
+#   # When true, transaction-submitting tools log "would have sent X" and
+#   # return synthetic signatures instead of submitting. Default true.
+#   dry_run: true
+#   # Per-tick transaction submission cap. Default 3.
+#   max_tx_per_tick: 3
+
+# Trade-safety caps. Apply to both modes.
+# limits:
+#   # Cap on Jupiter swap slippage (basis points). 500 = 5%. Default 500.
+#   max_slippage_bps: 500
+#   # Cap on Jupiter quote price impact (percent). Default 2.0.
+#   max_price_impact_pct: 2.0

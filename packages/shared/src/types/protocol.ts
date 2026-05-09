@@ -29,11 +29,39 @@ export interface ClientTransactionError {
   reason: string;
 }
 
+// --- Owner-only allowlist admin (Sprint 2 #20) ---
+//
+// Operators running an agent in `allowlist` auth mode otherwise have to
+// hand-edit `wallets.allowlist.json` to grant access. These messages let
+// the on-chain owner manage the list from the chat UI. All three are
+// gated server-side by `isOwnerVerified` — non-owner clients receive a
+// `not_authorized` error code.
+
+/** Request a snapshot of the current allowlist (file ∪ env, deduped). */
+export interface ClientAllowlistList {
+  type: 'allowlist_list';
+}
+
+/** Add a base58 pubkey to the allowlist file. Idempotent. */
+export interface ClientAllowlistAdd {
+  type: 'allowlist_add';
+  pubkey: string;
+}
+
+/** Remove a base58 pubkey from the allowlist file. Idempotent. */
+export interface ClientAllowlistRemove {
+  type: 'allowlist_remove';
+  pubkey: string;
+}
+
 export type ClientMessage =
   | ClientAuthResponse
   | ClientChatMessage
   | ClientTransactionResult
-  | ClientTransactionError;
+  | ClientTransactionError
+  | ClientAllowlistList
+  | ClientAllowlistAdd
+  | ClientAllowlistRemove;
 
 // --- Server -> Client Messages ---
 
@@ -97,6 +125,43 @@ export interface ServerError {
   type: 'error';
   error: string;
   code?: string;
+}
+
+/**
+ * Snapshot of the current allowlist (file ∪ env, deduped). Sent in
+ * response to `allowlist_list` and after successful add/remove. Echoed
+ * `source` lets the UI show which file the operator should hand-edit if
+ * they prefer to bypass the admin (defaults to wallets.allowlist.json).
+ */
+export interface ServerAllowlistState {
+  type: 'allowlist_state';
+  /** Base58 pubkeys currently allowed (may include the owner — owner is also always implicitly allowed). */
+  wallets: string[];
+  /** Echo of the absolute path to the JSON file the server is mutating. */
+  filePath: string;
+  /** Wallets supplied via the WALLET_ALLOWLIST env var — read-only from the UI. */
+  envWallets: string[];
+}
+
+/**
+ * Targeted error for the allowlist admin protocol. Distinct from the
+ * generic `error` shape so the UI can surface it next to the admin panel
+ * rather than as a chat-level error.
+ */
+export interface ServerAllowlistError {
+  type: 'allowlist_error';
+  /**
+   * Coded reason. Only `not_authorized` and `bad_pubkey` are user-visible
+   * recovery cases; the others map to "something is broken on the server".
+   */
+  code:
+    | 'not_authorized'
+    | 'bad_pubkey'
+    | 'wrong_auth_mode'
+    | 'file_write_failed'
+    | 'env_only'
+    | 'internal';
+  message: string;
 }
 
 // --- Debug Events (Server -> Client) ---
@@ -187,4 +252,6 @@ export type ServerMessage =
   | ServerTyping
   | ServerTransaction
   | ServerError
+  | ServerAllowlistState
+  | ServerAllowlistError
   | DebugMessage;

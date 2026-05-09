@@ -87,3 +87,77 @@ test('AllowlistFile drops file entries after the file is deleted', () => {
   f.reload();
   assert.deepEqual(f.current(), ['pk2']);
 });
+
+// --- Mutation API (Sprint 2 #20: owner-only allowlist admin) ---
+
+test('AllowlistFile.addWallet appends and persists', () => {
+  const p = tmpFile(JSON.stringify({ wallets: ['pk1'] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  const added = f.addWallet('pk2');
+  assert.equal(added, true);
+  assert.deepEqual([...f.current()].sort(), ['pk1', 'pk2']);
+  // Re-construct from disk to confirm it was actually written, not just held in-memory.
+  const f2 = new AllowlistFile({ path: p, envFallback: [] });
+  assert.deepEqual([...f2.current()].sort(), ['pk1', 'pk2']);
+});
+
+test('AllowlistFile.addWallet is idempotent on duplicates', () => {
+  const p = tmpFile(JSON.stringify({ wallets: ['pk1'] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  const added = f.addWallet('pk1');
+  assert.equal(added, false);
+  assert.deepEqual(f.current(), ['pk1']);
+});
+
+test('AllowlistFile.addWallet trims whitespace before storing', () => {
+  const p = tmpFile(JSON.stringify({ wallets: [] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  f.addWallet('  pk-trimmed  ');
+  assert.deepEqual(f.current(), ['pk-trimmed']);
+});
+
+test('AllowlistFile.addWallet refuses empty input', () => {
+  const p = tmpFile(JSON.stringify({ wallets: [] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  assert.equal(f.addWallet(''), false);
+  assert.equal(f.addWallet('   '), false);
+  assert.deepEqual(f.current(), []);
+});
+
+test('AllowlistFile.removeWallet removes and persists', () => {
+  const p = tmpFile(JSON.stringify({ wallets: ['pk1', 'pk2', 'pk3'] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  const removed = f.removeWallet('pk2');
+  assert.equal(removed, true);
+  assert.deepEqual([...f.current()].sort(), ['pk1', 'pk3']);
+  const f2 = new AllowlistFile({ path: p, envFallback: [] });
+  assert.deepEqual([...f2.current()].sort(), ['pk1', 'pk3']);
+});
+
+test('AllowlistFile.removeWallet is idempotent on missing entries', () => {
+  const p = tmpFile(JSON.stringify({ wallets: ['pk1'] }));
+  const f = new AllowlistFile({ path: p, envFallback: [] });
+  const removed = f.removeWallet('pk-not-there');
+  assert.equal(removed, false);
+  assert.deepEqual(f.current(), ['pk1']);
+});
+
+test('AllowlistFile.fileWallets / envWallets distinguish sources', () => {
+  const p = tmpFile(JSON.stringify({ wallets: ['file-pk'] }));
+  const f = new AllowlistFile({ path: p, envFallback: ['env-pk'] });
+  assert.deepEqual([...f.fileWallets()], ['file-pk']);
+  assert.deepEqual([...f.envWallets], ['env-pk']);
+});
+
+test('AllowlistFile.removeWallet on env-supplied entry leaves env list intact (non-mutating)', () => {
+  // Env entries are immutable from this API. The protocol layer rejects
+  // env-source removes upstream; this test just confirms the file-level
+  // call doesn't accidentally mutate envFallback when the entry happens
+  // to also exist in the file.
+  const p = tmpFile(JSON.stringify({ wallets: ['both-pk'] }));
+  const f = new AllowlistFile({ path: p, envFallback: ['both-pk'] });
+  f.removeWallet('both-pk');
+  assert.deepEqual([...f.envWallets], ['both-pk']);
+  // Merged view still shows the entry, sourced from env.
+  assert.deepEqual([...f.current()], ['both-pk']);
+});
