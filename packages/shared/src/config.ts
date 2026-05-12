@@ -5,6 +5,7 @@ import { z } from 'zod';
 import bs58 from 'bs58';
 import { getState } from './state.js';
 import { AllowlistFile } from './allowlist-file.js';
+import { loadAgentConfigFile, applyAgentConfigToEnv } from './agent-config.js';
 
 // Load .env from workspace root — walk up from cwd until we find it
 function findEnvFile(from: string): string {
@@ -20,6 +21,28 @@ function findEnvFile(from: string): string {
 }
 
 config({ path: findEnvFile(process.cwd()) });
+
+// Optional `agent.config.yaml` overlay — provides human-readable defaults
+// for non-secret behavioral knobs (persona, worker cadence, slippage caps,
+// agent name). Layered UNDER process.env so a deploy-time env override
+// always wins. Missing file is the common case (the file is optional);
+// malformed file throws here at module load with an actionable message.
+try {
+  const agentCfg = loadAgentConfigFile();
+  if (agentCfg) {
+    const written = applyAgentConfigToEnv(agentCfg);
+    const keys = Object.keys(written);
+    if (keys.length > 0) {
+      // Single-line summary so operators see at a glance which fields the
+      // yaml supplied vs which were already present in the env.
+      console.log(`[config] applied agent.config.yaml defaults: ${keys.join(', ')}`);
+    }
+  }
+} catch (err) {
+  // Re-throw — unrecoverable. The original error already names the file
+  // and line so the operator can fix it without further hints.
+  throw err;
+}
 
 // ---------------------------------------------------------------------------
 // Environment variables
@@ -198,6 +221,18 @@ const envSchema = z.object({
   /** Hard cap on how long the server waits for a SIWS handshake to complete. */
   AUTH_HANDSHAKE_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(30_000),
   ASSISTANT_NAME: z.string().default('Agent'),
+  /**
+   * Persona slug — selects a bundled or fork-defined system-prompt body.
+   * Defaults to 'default' (the original template behavior). Unknown slugs
+   * silently fall back to default; the agent factory logs a warning so a
+   * typo'd value is visible in logs without bricking the agent.
+   *
+   * Bundled personas:
+   *   default, token-launch-concierge, wallet-cleanup-bot,
+   *   treasury-rebalancer.
+   * See packages/core/src/personas/ for definitions.
+   */
+  AGENT_PERSONA: optional(z.string().min(1)),
   JUPITER_API_KEY: optional(z.string().min(1)),
   AGENT_FEE_SOL: z.coerce.number().min(0).max(1).default(0.001),
   TOKEN_OVERRIDE: optional(base58Address('TOKEN_OVERRIDE')),
@@ -257,6 +292,15 @@ const envSchema = z.object({
   ),
   /** Per-tick transaction submission cap. Resets every tick. (autonomous mode only) */
   MAX_TICK_TX_COUNT: z.coerce.number().int().min(0).default(3),
+  /**
+   * Owner-gated /_dashboard auth token. When set, requests must supply it
+   * via the `X-Dashboard-Token` header — query-string tokens are NOT
+   * accepted (they leak via access logs, Referer, and browser history).
+   * When unset, the dashboard is reachable from loopback only (127.0.0.1
+   * / ::1) — fail-closed for any non-loopback request. Avoid logging this
+   * value; it's effectively a bearer credential.
+   */
+  DASHBOARD_TOKEN: optional(z.string().min(8)),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

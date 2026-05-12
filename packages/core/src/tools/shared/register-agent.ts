@@ -9,6 +9,7 @@ import {
   getConfig,
   info,
   ok,
+  printRegistrationBanner,
   readAgentContext,
   setState,
   updateConfigFromState,
@@ -99,6 +100,16 @@ export const registerAgent = createTool({
         setState({ agentAssetAddress: result.assetAddress });
         updateConfigFromState();
         clearOwnerCache();
+
+        // Loud, copy-pasteable reminder. On PaaS targets with ephemeral
+        // filesystems (Railway/Fly/Render/Heroku) the next redeploy would
+        // otherwise nuke agent-state.json and silently re-register the
+        // agent under a fresh asset address — the canonical footgun.
+        printRegistrationBanner({
+          kind: 'agent',
+          address: result.assetAddress,
+          envKey: 'AGENT_ASSET_ADDRESS',
+        });
 
         return ok({
           assetAddress: result.assetAddress,

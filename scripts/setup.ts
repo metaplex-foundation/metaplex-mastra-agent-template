@@ -226,9 +226,33 @@ async function main(): Promise<void> {
     }
   }
 
+  // 5. Persona preset
+  console.log('\n5. Agent persona (system-prompt preset)\n');
+  console.log('  Picks the agent\'s domain identity. Bundled options:');
+  console.log('    1) default                  — general-purpose Solana agent');
+  console.log('    2) token-launch-concierge   — walks users through launching a token');
+  console.log('    3) wallet-cleanup-bot       — finds and sweeps dust');
+  console.log('    4) treasury-rebalancer      — autonomous treasury management');
+  console.log('  See packages/core/src/personas/ for the full prompts.\n');
+  const PERSONA_CHOICES: Record<string, string> = {
+    '1': 'default',
+    '2': 'token-launch-concierge',
+    '3': 'wallet-cleanup-bot',
+    '4': 'treasury-rebalancer',
+  };
+  let agentPersona: string = 'default';
+  while (true) {
+    const raw = (await ask('Pick persona [1-4]', '1')).trim();
+    if (raw in PERSONA_CHOICES) {
+      agentPersona = PERSONA_CHOICES[raw]!;
+      break;
+    }
+    console.log(`  "${raw}" is not a valid choice. Enter 1-4.`);
+  }
+
   rl.close();
 
-  // 5. Render .env
+  // 6. Render .env
   const examplePath = resolve(ROOT, '.env.example');
   let envContent = existsSync(examplePath) ? readFileSync(examplePath, 'utf8') : '';
 
@@ -264,6 +288,12 @@ async function main(): Promise<void> {
     /^# ?BOOTSTRAP_WALLET=.*$/m,
     bootstrapWallet ? `BOOTSTRAP_WALLET=${bootstrapWallet}` : '# BOOTSTRAP_WALLET=',
   );
+  // AGENT_PERSONA — only emit a non-comment line when the operator picked
+  // a non-default persona, so a freshly-set-up .env stays minimal.
+  replaceOrAppend(
+    /^# ?AGENT_PERSONA=.*$/m,
+    agentPersona === 'default' ? '# AGENT_PERSONA=default' : `AGENT_PERSONA=${agentPersona}`,
+  );
 
   // LLM_MODEL is optional in the slim example (defaults to Anthropic Claude).
   // Only write a line when the operator picked a non-default provider.
@@ -292,7 +322,7 @@ async function main(): Promise<void> {
     console.log(`  (${appended.length} key${appended.length === 1 ? '' : 's'} appended because .env.example was missing the placeholder line)`);
   }
 
-  // 6. wallets.allowlist.json
+  // 7. wallets.allowlist.json
   if (mode === 'public' && walletAllowlist) {
     const allowlistPath = resolve(ROOT, 'wallets.allowlist.json');
     let seedAllowlist = !existsSync(allowlistPath);

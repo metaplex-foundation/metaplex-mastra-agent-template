@@ -27,6 +27,10 @@ import {
 import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';
 import { RequestContext } from '@mastra/core/request-context';
 import { Session, type SimpleRateLimiter } from './session.js';
+import {
+  isDashboardRequest,
+  handleDashboardRequest,
+} from './dashboard.js';
 
 // Split regexes for different base58 contexts
 const BASE58_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -211,7 +215,19 @@ export class PlexChatServer {
       process.exit(1);
     }
 
-    this.httpServer = createServer();
+    // Pass a request handler to createServer so plain HTTP requests (the
+    // dashboard) get routed to our handler. WebSocket upgrade requests
+    // bypass this — the WS server hooks the 'upgrade' event itself.
+    this.httpServer = createServer((req, res) => {
+      if (isDashboardRequest(req)) {
+        handleDashboardRequest(req, res, this);
+        return;
+      }
+      // 404 anything else so unrelated probes get a clean response rather
+      // than hanging until the socket times out.
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+    });
 
     this.wss = new WebSocketServer({
       server: this.httpServer,
@@ -583,6 +599,15 @@ export class PlexChatServer {
         break;
       case 'tx_error':
         this.handleTxError(session, msg.correlationId, msg.reason);
+        break;
+      case 'allowlist_list':
+        await this.handleAllowlistList(session);
+        break;
+      case 'allowlist_add':
+        await this.handleAllowlistMutate(session, 'add', msg.pubkey);
+        break;
+      case 'allowlist_remove':
+        await this.handleAllowlistMutate(session, 'remove', msg.pubkey);
         break;
       default: {
         // Truncate the echoed type to avoid attacker-controlled-length log spam
@@ -1191,6 +1216,172 @@ export class PlexChatServer {
         total: options?.total,
         feeSol: options?.feeSol,
       });
+    });
+  }
+
+  /**
+   * Owner-only: send the current allowlist snapshot to the requesting
+   * session. Non-owner senders get an `allowlist_error: not_authorized`.
+   *
+   * The snapshot includes the env-supplied wallets too, so the UI can
+   * display them as "read-only" rows alongside the file-managed entries.
+   * We deliberately do NOT include the on-chain owner in the wallets
+   * array — the owner is implicitly always allowed regardless, and adding
+   * it to the user-visible list invites a confusing "remove the owner?"
+   * UX path that does nothing.
+   */
+  private async handleAllowlistList(session: Session): Promise<void> {
+    if (!(await this.requireOwner(session))) return;
+    this.sendAllowlistState(session);
+  }
+
+  /**
+   * Owner-only: add or remove a base58 pubkey from the allowlist file.
+   * On success, broadcasts the new snapshot to the requesting session.
+   * Validation errors and write failures map to coded `allowlist_error`
+   * messages — the UI surfaces them inline next to the input.
+   */
+  private async handleAllowlistMutate(
+    session: Session,
+    op: 'add' | 'remove',
+    rawPubkey: unknown,
+  ): Promise<void> {
+    if (!(await this.requireOwner(session))) return;
+    const config = getConfig();
+    if (config.AGENT_AUTH_MODE !== 'allowlist') {
+      session.send({
+        type: 'allowlist_error',
+        code: 'wrong_auth_mode',
+        message:
+          `Agent is in '${config.AGENT_AUTH_MODE}' mode — the allowlist is only ` +
+          'consulted in `allowlist` mode. Set AGENT_AUTH_MODE=allowlist (or add ' +
+          'WALLET_ALLOWLIST entries) and restart to enable list management.',
+      });
+      return;
+    }
+    if (typeof rawPubkey !== 'string' || !BASE58_ADDRESS_RE.test(rawPubkey)) {
+      session.send({
+        type: 'allowlist_error',
+        code: 'bad_pubkey',
+        message: 'pubkey must be a valid base58 32-byte Solana address',
+      });
+      return;
+    }
+    // Regex matches base58-shaped strings of length 32-44, but a 32-char
+    // base58 string only decodes to ~23 bytes — not a valid Solana pubkey.
+    // umi's `publicKey()` parses + validates length, so use it as the
+    // canonical 32-byte check before persisting to the allowlist file.
+    let normalizedPubkey: string;
+    try {
+      normalizedPubkey = publicKey(rawPubkey).toString();
+    } catch (err) {
+      session.send({
+        type: 'allowlist_error',
+        code: 'bad_pubkey',
+        message: 'pubkey must decode to a 32-byte Solana public key',
+      });
+      return;
+    }
+    if (op === 'remove' && this.allowlistFile.envWallets.includes(normalizedPubkey)) {
+      // Tell the operator the entry is sourced from env so they don't think
+      // the remove silently failed.
+      session.send({
+        type: 'allowlist_error',
+        code: 'env_only',
+        message:
+          `Wallet ${rawPubkey} is in WALLET_ALLOWLIST (env). Remove it from the ` +
+          'env var and restart the server — the file admin cannot manage env-supplied entries.',
+      });
+      return;
+    }
+    try {
+      if (op === 'add') {
+        this.allowlistFile.addWallet(normalizedPubkey);
+      } else {
+        this.allowlistFile.removeWallet(normalizedPubkey);
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error('[allowlist-admin] file write failed:', detail);
+      session.send({
+        type: 'allowlist_error',
+        code: 'file_write_failed',
+        message: 'Failed to update the allowlist file. Check server logs and file permissions.',
+      });
+      return;
+    }
+    this.sendAllowlistState(session);
+  }
+
+  /**
+   * Gate an admin request on live on-chain ownership.
+   *
+   * `session.isOwnerVerified` reflects the owner at the time of SIWS
+   * handshake — a long-lived session could otherwise keep admin rights
+   * after an on-chain ownership transfer. Re-resolving each call (with
+   * the existing `resolveOwner` TTL cache) makes the check honor the
+   * current owner. Resolver errors fail closed.
+   */
+  private async requireOwner(session: Session): Promise<boolean> {
+    if (session.authStatus !== 'authenticated' || !session.walletAddress) {
+      this.logAuthFailure('allowlist_admin_not_authenticated', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+      });
+      session.send({
+        type: 'allowlist_error',
+        code: 'not_authorized',
+        message: 'Allowlist admin requires the on-chain owner wallet.',
+      });
+      return false;
+    }
+    const config = getConfig();
+    let currentOwner: string | null;
+    try {
+      currentOwner = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logAuthFailure('allowlist_admin_owner_resolve_failed', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+        detail,
+      });
+      session.send({
+        type: 'allowlist_error',
+        code: 'not_authorized',
+        message: 'Could not verify current on-chain owner.',
+      });
+      return false;
+    }
+    if (currentOwner === null || session.walletAddress !== currentOwner) {
+      this.logAuthFailure('allowlist_admin_not_owner', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+      });
+      // Keep the session's cached owner flag in sync with the live owner so
+      // emit-context and other consumers don't keep advertising stale state.
+      session.isOwnerVerified = false;
+      session.send({
+        type: 'allowlist_error',
+        code: 'not_authorized',
+        message: 'Allowlist admin requires the on-chain owner wallet.',
+      });
+      return false;
+    }
+    session.isOwnerVerified = true;
+    return true;
+  }
+
+  /** Build and send a fresh snapshot to a single session. */
+  private sendAllowlistState(session: Session): void {
+    // Force a reload so an out-of-band edit (e.g. the operator hand-editing
+    // the file) is visible to the admin without waiting for the poll cycle.
+    this.allowlistFile.reload();
+    session.send({
+      type: 'allowlist_state',
+      wallets: [...this.allowlistFile.fileWallets()],
+      filePath: this.allowlistFile.path,
+      envWallets: [...this.allowlistFile.envWallets],
     });
   }
 

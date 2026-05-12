@@ -8,7 +8,11 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   },
   "dependencies": {
     "@mastra/core": "^1.24.0",

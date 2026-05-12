@@ -12,6 +12,7 @@ import {
   getConfig,
   info,
   ok,
+  printRegistrationBanner,
   setState,
   toToolError,
   updateConfigFromState,
@@ -126,6 +127,27 @@ export const launchToken = createTool({
 
       setState({ agentTokenMint: result.mintAddress });
       updateConfigFromState();
+
+      // Same persistence footgun as register-agent: ephemeral PaaS
+      // filesystems lose agent-state.json on redeploy unless the operator
+      // promotes the mint address to env. Loud banner with platform-aware
+      // instructions.
+      //
+      // Wrapped in its own try/catch so a stderr/banner failure cannot
+      // bubble into the outer catch and report a successful (irreversible)
+      // mint as a launch failure.
+      try {
+        printRegistrationBanner({
+          kind: 'token',
+          address: result.mintAddress,
+          envKey: 'AGENT_TOKEN_MINT',
+        });
+      } catch (bannerErr) {
+        console.error(
+          '[launch-token] banner emission failed (mint succeeded):',
+          bannerErr instanceof Error ? bannerErr.message : String(bannerErr),
+        );
+      }
 
       return ok({
         mintAddress: result.mintAddress,
