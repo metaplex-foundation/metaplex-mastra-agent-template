@@ -7,7 +7,9 @@ import { personas } from './personas/index.js';
 export function createPublicAgent() {
   const config = getConfig();
   const personaName = config.AGENT_PERSONA;
-  const isKnownPersona = personaName ? personaName in personas : true;
+  // Use `Object.hasOwn` rather than the `in` operator so prototype-chain
+  // keys (`toString`, `constructor`, …) can't masquerade as personas.
+  const isKnownPersona = personaName ? Object.hasOwn(personas, personaName) : true;
   if (personaName && !isKnownPersona) {
     // Unknown persona — log so the operator sees the typo, but proceed
     // with the default persona rather than crashing the agent on boot.

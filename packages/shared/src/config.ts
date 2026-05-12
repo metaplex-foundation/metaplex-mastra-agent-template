@@ -294,7 +294,8 @@ const envSchema = z.object({
   MAX_TICK_TX_COUNT: z.coerce.number().int().min(0).default(3),
   /**
    * Owner-gated /_dashboard auth token. When set, requests must supply it
-   * via `?token=<value>` query string or an `X-Dashboard-Token` header.
+   * via the `X-Dashboard-Token` header — query-string tokens are NOT
+   * accepted (they leak via access logs, Referer, and browser history).
    * When unset, the dashboard is reachable from loopback only (127.0.0.1
    * / ::1) — fail-closed for any non-loopback request. Avoid logging this
    * value; it's effectively a bearer credential.
