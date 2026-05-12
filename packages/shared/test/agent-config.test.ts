@@ -132,6 +132,11 @@ test('applyAgentConfigToEnv handles boolean dry_run via string conversion', () =
   const target = {} as Record<string, string>;
   applyAgentConfigToEnv({ worker: { dry_run: false } }, target);
   assert.equal(target.AUTONOMOUS_DRY_RUN, 'false');
-  // Boolean true → 'true' (zod schema accepts string 'true')
-  applyAgentConfigToEnv({ worker: { dry_run: true } }, { ...target, AUTONOMOUS_DRY_RUN: '' });
+  // Boolean true must serialize to the string 'true' so the env-driven
+  // schema (which preprocess()s string env values) sees it correctly.
+  // Use a fresh target with an empty AUTONOMOUS_DRY_RUN slot so the
+  // applyAgentConfigToEnv "empty == unset" rule lets the YAML default fill it.
+  const target2 = { AUTONOMOUS_DRY_RUN: '' } as Record<string, string>;
+  applyAgentConfigToEnv({ worker: { dry_run: true } }, target2);
+  assert.equal(target2.AUTONOMOUS_DRY_RUN, 'true');
 });

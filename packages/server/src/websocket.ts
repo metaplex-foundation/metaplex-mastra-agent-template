@@ -601,13 +601,13 @@ export class PlexChatServer {
         this.handleTxError(session, msg.correlationId, msg.reason);
         break;
       case 'allowlist_list':
-        this.handleAllowlistList(session);
+        await this.handleAllowlistList(session);
         break;
       case 'allowlist_add':
-        this.handleAllowlistMutate(session, 'add', msg.pubkey);
+        await this.handleAllowlistMutate(session, 'add', msg.pubkey);
         break;
       case 'allowlist_remove':
-        this.handleAllowlistMutate(session, 'remove', msg.pubkey);
+        await this.handleAllowlistMutate(session, 'remove', msg.pubkey);
         break;
       default: {
         // Truncate the echoed type to avoid attacker-controlled-length log spam
@@ -1230,8 +1230,8 @@ export class PlexChatServer {
    * it to the user-visible list invites a confusing "remove the owner?"
    * UX path that does nothing.
    */
-  private handleAllowlistList(session: Session): void {
-    if (!this.requireOwner(session)) return;
+  private async handleAllowlistList(session: Session): Promise<void> {
+    if (!(await this.requireOwner(session))) return;
     this.sendAllowlistState(session);
   }
 
@@ -1241,12 +1241,12 @@ export class PlexChatServer {
    * Validation errors and write failures map to coded `allowlist_error`
    * messages — the UI surfaces them inline next to the input.
    */
-  private handleAllowlistMutate(
+  private async handleAllowlistMutate(
     session: Session,
     op: 'add' | 'remove',
     rawPubkey: unknown,
-  ): void {
-    if (!this.requireOwner(session)) return;
+  ): Promise<void> {
+    if (!(await this.requireOwner(session))) return;
     const config = getConfig();
     if (config.AGENT_AUTH_MODE !== 'allowlist') {
       session.send({
@@ -1267,7 +1267,22 @@ export class PlexChatServer {
       });
       return;
     }
-    if (op === 'remove' && this.allowlistFile.envWallets.includes(rawPubkey)) {
+    // Regex matches base58-shaped strings of length 32-44, but a 32-char
+    // base58 string only decodes to ~23 bytes — not a valid Solana pubkey.
+    // umi's `publicKey()` parses + validates length, so use it as the
+    // canonical 32-byte check before persisting to the allowlist file.
+    let normalizedPubkey: string;
+    try {
+      normalizedPubkey = publicKey(rawPubkey).toString();
+    } catch (err) {
+      session.send({
+        type: 'allowlist_error',
+        code: 'bad_pubkey',
+        message: 'pubkey must decode to a 32-byte Solana public key',
+      });
+      return;
+    }
+    if (op === 'remove' && this.allowlistFile.envWallets.includes(normalizedPubkey)) {
       // Tell the operator the entry is sourced from env so they don't think
       // the remove silently failed.
       session.send({
@@ -1281,9 +1296,9 @@ export class PlexChatServer {
     }
     try {
       if (op === 'add') {
-        this.allowlistFile.addWallet(rawPubkey);
+        this.allowlistFile.addWallet(normalizedPubkey);
       } else {
-        this.allowlistFile.removeWallet(rawPubkey);
+        this.allowlistFile.removeWallet(normalizedPubkey);
       }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
@@ -1298,10 +1313,18 @@ export class PlexChatServer {
     this.sendAllowlistState(session);
   }
 
-  /** Helper — gate a request on `isOwnerVerified` and reply with not_authorized when missing. */
-  private requireOwner(session: Session): boolean {
-    if (session.authStatus !== 'authenticated' || !session.isOwnerVerified) {
-      this.logAuthFailure('allowlist_admin_not_owner', {
+  /**
+   * Gate an admin request on live on-chain ownership.
+   *
+   * `session.isOwnerVerified` reflects the owner at the time of SIWS
+   * handshake — a long-lived session could otherwise keep admin rights
+   * after an on-chain ownership transfer. Re-resolving each call (with
+   * the existing `resolveOwner` TTL cache) makes the check honor the
+   * current owner. Resolver errors fail closed.
+   */
+  private async requireOwner(session: Session): Promise<boolean> {
+    if (session.authStatus !== 'authenticated' || !session.walletAddress) {
+      this.logAuthFailure('allowlist_admin_not_authenticated', {
         sessionId: session.id,
         wallet: session.walletAddress,
       });
@@ -1312,6 +1335,40 @@ export class PlexChatServer {
       });
       return false;
     }
+    const config = getConfig();
+    let currentOwner: string | null;
+    try {
+      currentOwner = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      this.logAuthFailure('allowlist_admin_owner_resolve_failed', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+        detail,
+      });
+      session.send({
+        type: 'allowlist_error',
+        code: 'not_authorized',
+        message: 'Could not verify current on-chain owner.',
+      });
+      return false;
+    }
+    if (currentOwner === null || session.walletAddress !== currentOwner) {
+      this.logAuthFailure('allowlist_admin_not_owner', {
+        sessionId: session.id,
+        wallet: session.walletAddress,
+      });
+      // Keep the session's cached owner flag in sync with the live owner so
+      // emit-context and other consumers don't keep advertising stale state.
+      session.isOwnerVerified = false;
+      session.send({
+        type: 'allowlist_error',
+        code: 'not_authorized',
+        message: 'Allowlist admin requires the on-chain owner wallet.',
+      });
+      return false;
+    }
+    session.isOwnerVerified = true;
     return true;
   }
 

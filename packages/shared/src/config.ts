@@ -229,7 +229,7 @@ const envSchema = z.object({
    *
    * Bundled personas:
    *   default, token-launch-concierge, wallet-cleanup-bot,
-   *   treasury-rebalancer, portfolio-advisor, nft-mint-helper.
+   *   treasury-rebalancer.
    * See packages/core/src/personas/ for definitions.
    */
   AGENT_PERSONA: optional(z.string().min(1)),

@@ -16,6 +16,7 @@ export type PaasPlatform =
   | 'render'
   | 'heroku'
   | 'kubernetes'
+  | 'cloud-run'
   | 'unknown';
 
 export interface PaasInfo {
@@ -46,6 +47,11 @@ const KUBERNETES_INSTRUCTIONS =
   'Add the line above to the Deployment\'s `env:` section (or use a Secret/ConfigMap and ' +
   'reference it via `envFrom:`). Without this the agent loses identity on the next pod restart.';
 
+const CLOUD_RUN_INSTRUCTIONS =
+  'Run `gcloud run services update <service> --update-env-vars <line above>` ' +
+  '(or set it in the Cloud Run console → Variables & Secrets). Without this the ' +
+  'agent loses identity on the next revision.';
+
 const LOCAL_INSTRUCTIONS =
   'Add the line above to your `.env` file (it has been written to agent-state.json already, ' +
   'so local dev will pick it up automatically — but env-only deploys need the line).';
@@ -74,9 +80,15 @@ export function detectPaas(env: NodeJS.ProcessEnv = process.env): PaasInfo {
   if (env.DYNO || env.HEROKU_APP_ID) {
     return { platform: 'heroku', label: 'Heroku', instructions: HEROKU_INSTRUCTIONS };
   }
-  // Kubernetes (generic): every pod has KUBERNETES_SERVICE_HOST. Knative/Cloud
-  // Run sets K_SERVICE on top of that.
-  if (env.KUBERNETES_SERVICE_HOST || env.K_SERVICE) {
+  // Cloud Run / Knative sets K_SERVICE. Check BEFORE the generic Kubernetes
+  // case: Cloud Run runs on top of K8s and may also expose
+  // KUBERNETES_SERVICE_HOST, but the gcloud/console workflow is the right
+  // guidance — `kubectl` doesn't apply.
+  if (env.K_SERVICE) {
+    return { platform: 'cloud-run', label: 'Cloud Run/Knative', instructions: CLOUD_RUN_INSTRUCTIONS };
+  }
+  // Kubernetes (generic): every pod has KUBERNETES_SERVICE_HOST.
+  if (env.KUBERNETES_SERVICE_HOST) {
     return { platform: 'kubernetes', label: 'Kubernetes', instructions: KUBERNETES_INSTRUCTIONS };
   }
   return { platform: 'unknown', label: 'local', instructions: LOCAL_INSTRUCTIONS };

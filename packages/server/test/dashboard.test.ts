@@ -99,12 +99,14 @@ test('authorizeDashboard rejects non-loopback when DASHBOARD_TOKEN is unset', as
   assert.deepEqual(denied, { status: 403, body: 'forbidden' });
 });
 
-test('authorizeDashboard accepts ?token= when DASHBOARD_TOKEN matches', async () => {
+test('authorizeDashboard rejects ?token= query strings even when DASHBOARD_TOKEN matches', async () => {
+  // Query-string tokens leak via access logs, Referer headers, and browser
+  // history. The dashboard only accepts the X-Dashboard-Token header.
   process.env.DASHBOARD_TOKEN = 'super-secret-token-123';
   const { authorizeDashboard } = await loadDashboard();
-  assert.equal(
+  assert.deepEqual(
     authorizeDashboard(makeReq({ url: '/_dashboard?token=super-secret-token-123', remote: '10.0.0.5' })),
-    null,
+    { status: 401, body: 'unauthorized' },
   );
 });
 

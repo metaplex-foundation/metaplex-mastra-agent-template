@@ -11,10 +11,11 @@ import { getConfig, getState } from '@metaplex-agent/shared';
  * Auth model:
  *   - DASHBOARD_TOKEN unset (default): loopback-only (127.0.0.1 / ::1).
  *     Adequate for `pnpm dev`, never exposed publicly.
- *   - DASHBOARD_TOKEN set: any request supplying the token via
- *     `?token=<value>` OR `X-Dashboard-Token: <value>` is allowed.
- *     Loopback origin is also still allowed (so `pnpm dev` keeps working
- *     without setting the env).
+ *   - DASHBOARD_TOKEN set: any request supplying the token via the
+ *     `X-Dashboard-Token: <value>` header is allowed. Loopback origin is
+ *     also still allowed (so `pnpm dev` keeps working without setting the
+ *     env). Query-string tokens are intentionally NOT accepted — they
+ *     leak via access logs, Referer headers, and browser history.
  *
  * Why not SIWS-gate it? SIWS lives over WebSocket and is per-session.
  * The dashboard is HTTP and meant to be poll-friendly (uptime monitors,
@@ -67,12 +68,11 @@ export function authorizeDashboard(req: IncomingMessage): null | { status: numbe
   if (!token || token.length === 0) {
     return { status: 403, body: 'forbidden' };
   }
-  // Either ?token=... query string OR X-Dashboard-Token header.
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  const queryToken = url.searchParams.get('token');
+  // Header-only. Query-string tokens are not accepted — they leak via
+  // access logs, Referer headers, and browser history.
   const headerToken = req.headers['x-dashboard-token'];
   const headerValue = Array.isArray(headerToken) ? headerToken[0] : headerToken;
-  if (queryToken === token || headerValue === token) return null;
+  if (headerValue === token) return null;
   return { status: 401, body: 'unauthorized' };
 }
 
