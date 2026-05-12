@@ -155,15 +155,15 @@ async function submitOrSend(
 
 ## Protocol Types
 
-**Source of truth**: [`@metaplex-foundation/plexchat`](../../../metaplex-plexchat) (sibling repo at `../metaplex-plexchat`).
+**Source of truth**: [`@metaplex-foundation/plexchat`](https://www.npmjs.com/package/@metaplex-foundation/plexchat) on npm.
 
 The PlexChat wire protocol — every `ClientMessage` / `ServerMessage` variant
-and the `debug:*` event family — lives in the standalone `@metaplex-foundation/plexchat`
-package so the chat UI can import the exact same definitions instead of
-vendoring a copy that drifts. `packages/shared` declares it as a `workspace:*`
-dependency (via `pnpm-workspace.yaml` listing `../metaplex-plexchat`) and
-re-exports everything through `src/types/protocol.ts` and `src/siws.ts` —
-so existing `@metaplex-foundation/shared` consumers see no API change.
+and the `debug:*` event family — lives in the published
+`@metaplex-foundation/plexchat` package so the chat UI can import the exact
+same definitions instead of vendoring a copy that drifts. `packages/shared`
+pins it as a regular dependency in `package.json` and re-exports everything
+through `src/types/protocol.ts` and `src/siws.ts` — so existing
+`@metaplex-foundation/shared` consumers see no API change.
 
 Full protocol spec: [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md).
 

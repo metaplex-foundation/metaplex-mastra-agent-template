@@ -50,7 +50,7 @@ The full env contract lives in [`.env.example`](../../.env.example) and [`docs/S
 
 ## Protocol Message Summary
 
-The wire types live in [`@metaplex-foundation/plexchat`](../../../metaplex-plexchat) (a sibling package that the chat UI also depends on, so the two sides can't drift). The full prose spec is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md). Below is a summary of all message types.
+The wire types live in [`@metaplex-foundation/plexchat`](https://www.npmjs.com/package/@metaplex-foundation/plexchat) — the same npm package the chat UI depends on, so the two sides can't drift. The full prose spec is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md). Below is a summary of all message types.
 
 ### Client to Server
 
