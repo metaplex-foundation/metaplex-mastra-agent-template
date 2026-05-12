@@ -1,4 +1,4 @@
-# @metaplex-agent/core
+# @metaplex-foundation/core
 
 The Mastra agent definition and Solana tool library for the Metaplex Agent Template. This package contains the AI agent, its system prompt, and a set of ready-to-use tools for interacting with the Solana blockchain.
 
@@ -54,7 +54,7 @@ You must also set the corresponding API key environment variable for your chosen
 | OpenAI     | `OPENAI_API_KEY`               |
 | Google     | `GOOGLE_GENERATIVE_AI_API_KEY` |
 
-The `getConfig()` function from `@metaplex-agent/shared` reads `LLM_MODEL` and passes it to the Mastra `Agent` constructor as the `model` field.
+The `getConfig()` function from `@metaplex-foundation/shared` reads `LLM_MODEL` and passes it to the Mastra `Agent` constructor as the `model` field.
 
 ## Included Tools
 
@@ -77,7 +77,7 @@ Create a new file in `src/tools/`, for example `src/tools/my-new-tool.ts`:
 ```typescript
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { createUmi } from '@metaplex-agent/shared';
+import { createUmi } from '@metaplex-foundation/shared';
 
 export const myNewTool = createTool({
   id: 'my-new-tool',
@@ -141,7 +141,7 @@ import {
   createUmi,
   submitOrSend,
   type AgentContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const myTransactionTool = createTool({

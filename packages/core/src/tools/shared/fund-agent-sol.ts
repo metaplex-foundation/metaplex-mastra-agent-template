@@ -14,7 +14,7 @@ import {
   readAgentContext,
   submitWithUserWallet,
   toToolError,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 
 export const fundAgentSol = createTool({
   id: 'fund-agent-sol',

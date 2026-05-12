@@ -17,7 +17,7 @@ import {
   toToolError,
   updateConfigFromState,
   type AgentContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const launchToken = createTool({

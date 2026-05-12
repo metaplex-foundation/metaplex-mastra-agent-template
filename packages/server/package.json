@@ -1,5 +1,5 @@
 {
-  "name": "@metaplex-agent/server",
+  "name": "@metaplex-foundation/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@mastra/core": "^1.24.0",
-    "@metaplex-agent/core": "workspace:*",
-    "@metaplex-agent/shared": "workspace:*",
+    "@metaplex-foundation/core": "workspace:*",
+    "@metaplex-foundation/shared": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

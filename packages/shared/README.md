@@ -1,4 +1,4 @@
-# @metaplex-agent/shared
+# @metaplex-foundation/shared
 
 The shared foundation for the Metaplex Agent Template. This package provides the configuration system, Umi factory, transaction helpers, protocol types, and context interfaces used by both the core agent and the WebSocket server.
 
@@ -14,7 +14,7 @@ export * from './umi.js';
 export * from './transaction.js';
 ```
 
-Other packages import from `@metaplex-agent/shared` directly:
+Other packages import from `@metaplex-foundation/shared` directly:
 
 ```typescript
 import {
@@ -26,7 +26,7 @@ import {
   type ServerTransaction,
   type ClientMessage,
   type ServerMessage,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 ```
 
 ## Configuration System
@@ -73,7 +73,7 @@ If validation fails, `getConfig()` throws an error listing all invalid fields wi
 ### Usage
 
 ```typescript
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 
 const config = getConfig();
 console.log(config.AGENT_MODE);      // 'public' or 'autonomous'
@@ -103,7 +103,7 @@ The `createUmi()` function creates a fully configured Metaplex Umi instance base
 ### Usage
 
 ```typescript
-import { createUmi } from '@metaplex-agent/shared';
+import { createUmi } from '@metaplex-foundation/shared';
 
 const umi = createUmi();
 // Use umi.rpc for RPC calls, umi.identity for the signer (autonomous mode)
@@ -155,52 +155,47 @@ async function submitOrSend(
 
 ## Protocol Types
 
-**File**: `src/types/protocol.ts`
+**Source of truth**: [`@metaplex-foundation/plexchat`](../../../metaplex-plexchat) (sibling repo at `../metaplex-plexchat`).
 
-All PlexChat WebSocket protocol message types are defined here as TypeScript interfaces. The full protocol specification is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md) at the repository root.
+The PlexChat wire protocol — every `ClientMessage` / `ServerMessage` variant
+and the `debug:*` event family — lives in the standalone `@metaplex-foundation/plexchat`
+package so the chat UI can import the exact same definitions instead of
+vendoring a copy that drifts. `packages/shared` declares it as a `workspace:*`
+dependency (via `pnpm-workspace.yaml` listing `../metaplex-plexchat`) and
+re-exports everything through `src/types/protocol.ts` and `src/siws.ts` —
+so existing `@metaplex-foundation/shared` consumers see no API change.
+
+Full protocol spec: [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md).
 
 ### Client to Server (ClientMessage)
 
-| Type                      | Interface                  | Fields                                                    |
-|---------------------------|----------------------------|-----------------------------------------------------------|
-| `auth_response`           | `ClientAuthResponse`       | `publicKey: string`, `signature: string`, `message: string` |
-| `message`                 | `ClientChatMessage`        | `content: string`, `sender_name?: string`                 |
-| `tx_result`               | `ClientTransactionResult`  | `correlationId: string`, `signature: string`              |
-| `tx_error`                | `ClientTransactionError`   | `correlationId: string`, `reason: string`                 |
-
-```typescript
-export type ClientMessage =
-  | ClientAuthResponse
-  | ClientChatMessage
-  | ClientTransactionResult
-  | ClientTransactionError;
-```
+| Type              | Interface                 | Fields                                                       |
+|-------------------|---------------------------|--------------------------------------------------------------|
+| `auth_response`   | `ClientAuthResponse`      | `publicKey: string`, `signature: string`, `message: string`  |
+| `message`         | `ClientChatMessage`       | `content: string`, `sender_name?: string`                    |
+| `tx_result`       | `ClientTransactionResult` | `correlationId: string`, `signature: string`                 |
+| `tx_error`        | `ClientTransactionError`  | `correlationId: string`, `reason: string`                    |
+| `allowlist_list`  | `ClientAllowlistList`     | (no fields — owner-only request for a snapshot)              |
+| `allowlist_add`   | `ClientAllowlistAdd`      | `pubkey: string` (owner-only)                                |
+| `allowlist_remove`| `ClientAllowlistRemove`   | `pubkey: string` (owner-only)                                |
 
 ### Server to Client (ServerMessage)
 
-| Type             | Interface              | Fields                                                                              |
-|------------------|------------------------|-------------------------------------------------------------------------------------|
-| `connected`      | `ServerConnected`      | `jid: string`                                                                       |
-| `auth_challenge` | `ServerAuthChallenge`  | `nonce`, `issuedAt`, `expiresAt`, `agentName`, `agentAsset`, `network`, `authMode`  |
-| `authenticated`  | `ServerAuthenticated`  | `walletAddress: string`, `isOwner: boolean`, `sessionId: string`                    |
-| `auth_error`     | `ServerAuthError`      | `code` (one of 6 SIWS codes), `message: string` — socket then closes with `4001`     |
-| `message`        | `ServerChatMessage`    | `content: string`, `sender: string`                                                 |
-| `typing`         | `ServerTyping`         | `isTyping: boolean`                                                                 |
-| `transaction`    | `ServerTransaction`    | `transaction`, `correlationId`, `message?`, `index?`, `total?`, `feeSol?`           |
-| `error`          | `ServerError`          | `error: string`, `code?: string`                                                    |
+| Type               | Interface               | Fields                                                                              |
+|--------------------|-------------------------|-------------------------------------------------------------------------------------|
+| `connected`        | `ServerConnected`       | `jid: string`                                                                       |
+| `auth_challenge`   | `ServerAuthChallenge`   | `nonce`, `issuedAt`, `expiresAt`, `agentName`, `agentAsset`, `network`, `authMode`  |
+| `authenticated`    | `ServerAuthenticated`   | `walletAddress: string`, `isOwner: boolean`, `sessionId: string`                    |
+| `auth_error`       | `ServerAuthError`       | `code: ServerAuthErrorCode`, `message: string` — socket closes with `4001`          |
+| `message`          | `ServerChatMessage`     | `content: string`, `sender: string`                                                 |
+| `typing`           | `ServerTyping`          | `isTyping: boolean`                                                                 |
+| `transaction`      | `ServerTransaction`     | `transaction`, `correlationId`, `message?`, `index?`, `total?`, `feeSol?`           |
+| `error`            | `ServerError`           | `error: string`, `code?: string`                                                    |
+| `allowlist_state`  | `ServerAllowlistState`  | `wallets: string[]`, `filePath: string`, `envWallets: string[]`                     |
+| `allowlist_error`  | `ServerAllowlistError`  | `code: ServerAllowlistErrorCode`, `message: string`                                 |
+| `debug:*`          | `DebugMessage`          | step / tool-call / tool-result / text-delta / step-complete / generation / context  |
 
-```typescript
-export type ServerMessage =
-  | ServerConnected
-  | ServerAuthChallenge
-  | ServerAuthenticated
-  | ServerAuthError
-  | ServerChatMessage
-  | ServerTyping
-  | ServerTransaction
-  | ServerError
-  | DebugMessage;
-```
+`ServerAuthErrorCode` covers the six server-emitted SIWS failure modes (`nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout`) plus three client-synthesized codes the chat hook may surface (`user_rejected`, `wallet_unsupported`, `unauthorized`). See `@metaplex-foundation/plexchat` exports for the exact unions.
 
 ## AgentContext and TransactionSender
 
@@ -265,7 +260,7 @@ export * from './my-helper.js';
 3. Import it in other packages:
 
 ```typescript
-import { myHelper } from '@metaplex-agent/shared';
+import { myHelper } from '@metaplex-foundation/shared';
 ```
 
 For new TypeScript types, add them to the appropriate file in `src/types/` or create a new types file and re-export it from `src/index.ts`.

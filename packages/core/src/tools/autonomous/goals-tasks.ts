@@ -10,7 +10,7 @@ import {
   getGoalById,
   info,
   ok,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 
 /**
  * Persist a goal the owner has briefed in chat. The agent should paraphrase

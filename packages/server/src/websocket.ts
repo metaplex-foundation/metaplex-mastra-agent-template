@@ -23,8 +23,10 @@ import {
   type ClientAuthResponse,
   type ServerAuthChallenge,
   type ServerAuthError,
-} from '@metaplex-agent/shared';
-import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';
+  type ServerErrorCode,
+  type DebugFinishReason,
+} from '@metaplex-foundation/shared';
+import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-foundation/core';
 import { RequestContext } from '@mastra/core/request-context';
 import { Session, type SimpleRateLimiter } from './session.js';
 import {
@@ -854,7 +856,10 @@ export class PlexChatServer {
         error:
           `Message exceeds maximum length of ${config.MAX_MESSAGE_CONTENT} characters ` +
           `(got ${content.length}).`,
-        code: 'MESSAGE_TOO_LARGE',
+        // TODO: add MESSAGE_TOO_LARGE to ServerErrorCode in the next
+        // @metaplex-foundation/plexchat release. The wire string is stable
+        // and the chat UI already handles unknown codes gracefully.
+        code: 'MESSAGE_TOO_LARGE' as ServerErrorCode,
       });
       return;
     }
@@ -1130,7 +1135,11 @@ export class PlexChatServer {
             cachedInputTokens: totalUsage?.cachedInputTokens,
           },
           totalDurationMs: Date.now() - startTime,
-          finishReason: (await stream.finishReason) ?? 'unknown',
+          // The AI SDK types `finishReason` as a broader `string`; the
+          // plexchat union covers every value Mastra/AI SDK currently emits
+          // plus our two synthesized terminals (`aborted`, `budget_exceeded`).
+          // Cast at the boundary instead of widening the wire type.
+          finishReason: ((await stream.finishReason) ?? 'unknown') as DebugFinishReason,
         });
       }
 

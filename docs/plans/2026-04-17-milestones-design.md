@@ -132,7 +132,7 @@ Unit tests for every tool, integration tests for the PlexChat protocol, one end-
 2–3 forks in their own repos (faucet agent, token-launch concierge, portfolio advisor) linked from the README. Proves the template is forkable for real use cases and gives external devs concrete starting points beyond the generic template.
 
 ### M8 — SDK extraction
-If external adoption materializes, extract `@metaplex-agent/sdk` as a library so devs can depend on it instead of forking. The template becomes one reference implementation rather than the only path.
+If external adoption materializes, extract `@metaplex-foundation/sdk` as a library so devs can depend on it instead of forking. The template becomes one reference implementation rather than the only path.
 
 ### M9 — Observability pack
 OpenTelemetry hooks + pre-built Grafana dashboards shipped with the template. High-leverage once third parties run the template in production and need the same visibility Metaplex ops has.

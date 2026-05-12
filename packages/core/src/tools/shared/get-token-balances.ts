@@ -5,7 +5,7 @@ import {
   fetchAllTokenByOwner,
   fetchMint,
 } from '@metaplex-foundation/mpl-toolbox';
-import { BASE58_ADDRESS_RE, createUmi, err, ok, toToolError } from '@metaplex-agent/shared';
+import { BASE58_ADDRESS_RE, createUmi, err, ok, toToolError } from '@metaplex-foundation/shared';
 
 export const getTokenBalances = createTool({
   id: 'get-token-balances',

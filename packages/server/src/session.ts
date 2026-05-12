@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
-import type { ServerMessage, SiwsParams } from '@metaplex-agent/shared';
+import type { ServerMessage, SiwsParams } from '@metaplex-foundation/shared';
 
 /**
  * Per-WebSocket-connection state.

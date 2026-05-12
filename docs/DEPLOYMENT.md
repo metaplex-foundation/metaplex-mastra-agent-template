@@ -63,7 +63,7 @@ See [`WEBSOCKET_PROTOCOL.md`](../WEBSOCKET_PROTOCOL.md) § Authentication for th
                 │ WS (plaintext, loopback/VPC)
                 ▼
  ┌─────────────────────────────┐
- │  @metaplex-agent/server      │   one or many replicas, stateless per session
+ │  @metaplex-foundation/server      │   one or many replicas, stateless per session
  └──────────────┬──────────────┘
                 │ HTTPS
                 ▼
@@ -165,7 +165,7 @@ CMD ["node", "packages/server/dist/index.js"]
           │  (optional) WSS for manual inspection
           ▼
  ┌─────────────────────────────┐
- │  @metaplex-agent/server      │   single replica, AGENT_AUTH_MODE=owner
+ │  @metaplex-foundation/server      │   single replica, AGENT_AUTH_MODE=owner
  │  OR                          │
  │  Custom worker loop          │   event-driven / cron / once-per-hour
  └──────────────┬──────────────┘
@@ -206,9 +206,9 @@ If the agent is purely schedule-driven (e.g. "rebalance every hour"), delete `pa
 
 ```typescript
 // packages/worker/src/index.ts (custom; you write this)
-import { createAgent } from '@metaplex-agent/core';
+import { createAgent } from '@metaplex-foundation/core';
 import { RequestContext } from '@mastra/core/request-context';
-import { readAgentState, getConfig } from '@metaplex-agent/shared';
+import { readAgentState, getConfig } from '@metaplex-foundation/shared';
 
 const agent = createAgent();
 const state = readAgentState();
@@ -307,7 +307,7 @@ COPY packages/shared ./packages/shared
 COPY packages/core ./packages/core
 COPY packages/server ./packages/server
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @metaplex-agent/shared --filter @metaplex-agent/core --filter @metaplex-agent/server build
+RUN pnpm --filter @metaplex-foundation/shared --filter @metaplex-foundation/core --filter @metaplex-foundation/server build
 
 FROM node:20-slim
 WORKDIR /app

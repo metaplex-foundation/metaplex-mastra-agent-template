@@ -1,4 +1,4 @@
-import { getConfig, resolveOwner } from '@metaplex-agent/shared';
+import { getConfig, resolveOwner } from '@metaplex-foundation/shared';
 import { PlexChatServer } from './websocket.js';
 import { WorkerLoop } from './worker-loop.js';
 

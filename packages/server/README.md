@@ -1,4 +1,4 @@
-# @metaplex-agent/server
+# @metaplex-foundation/server
 
 The PlexChat WebSocket server for the Metaplex Agent Template. This package provides the real-time communication layer between web frontends and the Mastra agent, implementing the PlexChat protocol for chat messaging, wallet management, and transaction bridging.
 
@@ -17,7 +17,7 @@ The server is a standalone WebSocket process built on the `ws` library. It:
 ### Development (with hot reload)
 
 ```bash
-pnpm --filter @metaplex-agent/server dev
+pnpm --filter @metaplex-foundation/server dev
 ```
 
 This uses `tsx watch` to auto-restart the server when source files change.
@@ -25,8 +25,8 @@ This uses `tsx watch` to auto-restart the server when source files change.
 ### Production
 
 ```bash
-pnpm --filter @metaplex-agent/server build
-pnpm --filter @metaplex-agent/server start
+pnpm --filter @metaplex-foundation/server build
+pnpm --filter @metaplex-foundation/server start
 ```
 
 This compiles TypeScript to `dist/` and runs the compiled JavaScript with Node.
@@ -50,31 +50,37 @@ The full env contract lives in [`.env.example`](../../.env.example) and [`docs/S
 
 ## Protocol Message Summary
 
-The full protocol specification is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md) at the repository root. Below is a summary of all message types.
+The wire types live in [`@metaplex-foundation/plexchat`](../../../metaplex-plexchat) (a sibling package that the chat UI also depends on, so the two sides can't drift). The full prose spec is in [WEBSOCKET_PROTOCOL.md](../../WEBSOCKET_PROTOCOL.md). Below is a summary of all message types.
 
 ### Client to Server
 
-| Type                | Direction        | Description                                                 |
-|---------------------|------------------|-------------------------------------------------------------|
-| `auth_response`     | Client -> Server | SIWS handshake response. Fields: `publicKey`, `signature`, `message`. |
-| `message`           | Client -> Server | Send a chat message to the agent. Fields: `content`, optional `sender_name`. |
-| `tx_result`         | Client -> Server | Report a signed transaction. Fields: `correlationId`, `signature`. |
-| `tx_error`          | Client -> Server | Report a failed/rejected transaction. Fields: `correlationId`, `reason`. |
+| Type                 | Direction        | Description                                                                                |
+|----------------------|------------------|--------------------------------------------------------------------------------------------|
+| `auth_response`      | Client -> Server | SIWS handshake response. Fields: `publicKey`, `signature`, `message`.                      |
+| `message`            | Client -> Server | Send a chat message to the agent. Fields: `content`, optional `sender_name`.               |
+| `tx_result`          | Client -> Server | Report a signed transaction. Fields: `correlationId`, `signature`.                         |
+| `tx_error`           | Client -> Server | Report a failed/rejected transaction. Fields: `correlationId`, `reason`.                   |
+| `allowlist_list`     | Client -> Server | Owner-only request for a snapshot of the current allowlist. No fields.                     |
+| `allowlist_add`      | Client -> Server | Owner-only request to add `pubkey` to the on-disk allowlist file. Idempotent.              |
+| `allowlist_remove`   | Client -> Server | Owner-only request to remove `pubkey` from the on-disk allowlist file. Idempotent.         |
 
 ### Server to Client
 
 All server → client messages are unicast to the originating session.
 
-| Type             | Direction        | Description                                                       |
-|------------------|------------------|-------------------------------------------------------------------|
-| `connected`      | Server -> Client | Sent on successful WS open. Contains `jid` identifier.            |
-| `auth_challenge` | Server -> Client | SIWS handshake challenge. Contains `nonce`, `agentName`, `agentAsset`, `network`, `authMode`, timestamps. |
-| `authenticated`  | Server -> Client | Handshake succeeded. Contains `walletAddress`, `isOwner`, `sessionId`. |
-| `auth_error`     | Server -> Client | Handshake failed. Contains `code` (one of `nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout`) and `message`. Socket is closed with code `4001`. |
-| `message`        | Server -> Client | Agent's chat response. Contains `content` and `sender` name.     |
-| `typing`         | Server -> Client | Typing indicator. `isTyping: true` when processing starts, `false` when done. |
-| `transaction`    | Server -> Client | Base64-encoded Solana transaction for wallet signing. Optional `message`, `index`, `total`, `feeSol`. |
-| `error`          | Server -> Client | Error response for invalid client messages.                       |
+| Type                | Direction        | Description                                                                                  |
+|---------------------|------------------|----------------------------------------------------------------------------------------------|
+| `connected`         | Server -> Client | Sent on successful WS open. Contains `jid` identifier.                                       |
+| `auth_challenge`    | Server -> Client | SIWS handshake challenge. Contains `nonce`, `agentName`, `agentAsset`, `network`, `authMode`, timestamps. |
+| `authenticated`     | Server -> Client | Handshake succeeded. Contains `walletAddress`, `isOwner`, `sessionId`.                       |
+| `auth_error`        | Server -> Client | Handshake failed. `code` is a `ServerAuthErrorCode` — server emits one of `nonce_expired`, `nonce_invalid`, `message_mismatch`, `signature_invalid`, `not_authorized`, `auth_timeout`. Socket then closes with code `4001`. |
+| `message`           | Server -> Client | Agent's chat response. Contains `content` and `sender` name.                                 |
+| `typing`            | Server -> Client | Typing indicator. `isTyping: true` when processing starts, `false` when done.                |
+| `transaction`       | Server -> Client | Base64-encoded Solana transaction for wallet signing. Optional `message`, `index`, `total`, `feeSol`. |
+| `error`             | Server -> Client | Error response for invalid client messages.                                                   |
+| `allowlist_state`   | Server -> Client | Snapshot of allowlist after a successful list/add/remove. `wallets`, `filePath`, `envWallets`. |
+| `allowlist_error`   | Server -> Client | Targeted allowlist-admin failure. `code` ∈ {`not_authorized`, `bad_pubkey`, `wrong_auth_mode`, `file_write_failed`, `env_only`, `internal`}. |
+| `debug:*`           | Server -> Client | Stream of trace events: `debug:step_start`, `debug:tool_call`, `debug:tool_result`, `debug:text_delta`, `debug:step_complete`, `debug:generation_complete`, `debug:context`. |
 
 ## How the Transaction Bridge Works
 

@@ -1,4 +1,4 @@
-import { withAuth } from '@metaplex-agent/shared';
+import { withAuth } from '@metaplex-foundation/shared';
 import { transferSol } from './transfer-sol.js';
 import { transferToken } from './transfer-token.js';
 

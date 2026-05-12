@@ -1,4 +1,4 @@
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 import { createPublicAgent } from './agent-public.js';
 import { createAutonomousAgent } from './agent-autonomous.js';
 

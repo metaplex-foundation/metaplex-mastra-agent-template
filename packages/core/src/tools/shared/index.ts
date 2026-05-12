@@ -1,4 +1,4 @@
-import { withAuth } from '@metaplex-agent/shared';
+import { withAuth } from '@metaplex-foundation/shared';
 import { getBalance } from './get-balance.js';
 import { getTokenBalances } from './get-token-balances.js';
 import { getTransaction } from './get-transaction.js';

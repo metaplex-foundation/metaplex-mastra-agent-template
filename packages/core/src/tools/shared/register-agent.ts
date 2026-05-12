@@ -17,7 +17,7 @@ import {
   toToolError,
   type AgentContext,
   type ToolResult,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 import { base58 } from '@metaplex-foundation/umi/serializers';
 

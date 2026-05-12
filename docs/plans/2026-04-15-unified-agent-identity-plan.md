@@ -149,7 +149,7 @@ if (!_config.AGENT_TOKEN_MINT && state.agentTokenMint) {
 
 **Step 2: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/shared typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared typecheck`
 Expected: PASS (no type errors)
 
 **Step 3: Commit**
@@ -216,7 +216,7 @@ Remove the `if (config.AGENT_MODE === 'autonomous')` block and the `if (!config.
 
 **Step 2: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/shared typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared typecheck`
 Expected: PASS
 
 **Step 3: Commit**
@@ -270,7 +270,7 @@ The full `AgentContext` type now requires `agentFeeSol` and `tokenOverride`, so 
 
 **Step 2: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/shared typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared typecheck`
 Expected: PASS
 
 **Step 3: Commit**
@@ -404,7 +404,7 @@ export {
 
 **Step 3: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/core typecheck`
 Expected: PASS
 
 **Step 4: Commit**
@@ -444,7 +444,7 @@ const context: AgentContext = {
 
 **Step 2: Update `register-agent.ts` — persist to state file**
 
-Add import: `import { setState } from '@metaplex-agent/shared';`
+Add import: `import { setState } from '@metaplex-foundation/shared';`
 
 After successful registration (after getting `result.assetAddress`), add:
 
@@ -460,7 +460,7 @@ message: `Agent registered successfully! Asset address: ${result.assetAddress}. 
 
 **Step 3: Update `launch-token.ts` — persist to state file + TOKEN_OVERRIDE check**
 
-Add import: `import { setState } from '@metaplex-agent/shared';`
+Add import: `import { setState } from '@metaplex-foundation/shared';`
 
 At the top of `execute`, check for TOKEN_OVERRIDE:
 
@@ -516,7 +516,7 @@ Update the "no token" error message similarly.
 
 **Step 6: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/core typecheck`
 Expected: PASS
 
 **Step 7: Commit**
@@ -536,7 +536,7 @@ git commit -m "feat: update tools for new AgentContext, state persistence, TOKEN
 **Step 1: Create `packages/core/src/prompts.ts`**
 
 ```typescript
-import type { AgentMode } from '@metaplex-agent/shared';
+import type { AgentMode } from '@metaplex-foundation/shared';
 
 const BASE_PROMPT = `You are a Solana blockchain agent with your own on-chain identity and wallet.
 
@@ -669,7 +669,7 @@ Replace the inline SYSTEM_PROMPT with the shared builder:
 
 ```typescript
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 import { publicAgentTools } from './tools/index.js';
 import { buildSystemPrompt } from './prompts.js';
 
@@ -690,7 +690,7 @@ export function createPublicAgent() {
 
 ```typescript
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 import { autonomousAgentTools } from './tools/index.js';
 import { buildSystemPrompt } from './prompts.js';
 
@@ -709,7 +709,7 @@ export function createAutonomousAgent() {
 
 **Step 3: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/core typecheck`
 Expected: PASS
 
 **Step 4: Commit**
@@ -744,7 +744,7 @@ const requestContext = new RequestContext<AgentContext>([
 
 **Step 2: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/server typecheck`
+Run: `pnpm --filter @metaplex-foundation/server typecheck`
 Expected: PASS
 
 **Step 3: Commit**
@@ -868,9 +868,9 @@ Expected: All packages build successfully with no errors.
 **Step 2: Verify TypeScript compiles**
 
 ```bash
-pnpm --filter @metaplex-agent/shared typecheck
-pnpm --filter @metaplex-agent/core typecheck
-pnpm --filter @metaplex-agent/server typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
+pnpm --filter @metaplex-foundation/core typecheck
+pnpm --filter @metaplex-foundation/server typecheck
 ```
 
 Expected: All pass.

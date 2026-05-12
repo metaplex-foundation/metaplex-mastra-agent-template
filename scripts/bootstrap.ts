@@ -229,8 +229,8 @@ function makeAutonomousPlan(): Plan {
       {
         file: 'packages/server/src/websocket.ts',
         label: 'drop publicToolNames import',
-        find: "import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';",
-        replace: "import { createAgent, autonomousToolNames } from '@metaplex-agent/core';",
+        find: "import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-foundation/core';",
+        replace: "import { createAgent, autonomousToolNames } from '@metaplex-foundation/core';",
       },
       {
         file: 'packages/server/src/websocket.ts',
@@ -274,8 +274,8 @@ function makePublicPlan(): Plan {
       {
         file: 'packages/server/src/websocket.ts',
         label: 'drop autonomousToolNames import',
-        find: "import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';",
-        replace: "import { createAgent, publicToolNames } from '@metaplex-agent/core';",
+        find: "import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-foundation/core';",
+        replace: "import { createAgent, publicToolNames } from '@metaplex-foundation/core';",
       },
       {
         file: 'packages/server/src/websocket.ts',

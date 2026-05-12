@@ -12,7 +12,7 @@ import {
   submitAsAgent,
   submitOrSend,
   toToolError,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 
 export const withdrawSol = createTool({
   id: 'withdraw-sol',

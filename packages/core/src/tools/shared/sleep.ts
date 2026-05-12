@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { err, ok } from '@metaplex-agent/shared';
+import { err, ok } from '@metaplex-foundation/shared';
 
 export const sleep = createTool({
   id: 'sleep',

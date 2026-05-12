@@ -50,7 +50,7 @@ export const sleep = createTool({
 
 **Step 2: Run typecheck**
 
-Run: `pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/core typecheck`
 Expected: No errors (file isn't imported yet, but should parse cleanly)
 
 **Step 3: Commit**
@@ -117,7 +117,7 @@ export const getTokenPrice = createTool({
 
 **Step 2: Run typecheck**
 
-Run: `pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/core typecheck`
 Expected: No errors
 
 **Step 3: Commit**
@@ -141,7 +141,7 @@ This tool uses the DAS `getAsset` RPC method, which is available on Helius, Trit
 ```typescript
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { createUmi } from '@metaplex-agent/shared';
+import { createUmi } from '@metaplex-foundation/shared';
 
 export const getTokenMetadata = createTool({
   id: 'get-token-metadata',
@@ -189,7 +189,7 @@ export const getTokenMetadata = createTool({
 
 **Step 2: Run typecheck**
 
-Run: `pnpm --filter @metaplex-agent/shared build && pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared build && pnpm --filter @metaplex-foundation/core typecheck`
 Expected: No errors
 
 **Step 3: Commit**
@@ -236,7 +236,7 @@ export const toolNames = Object.keys(tools);
 
 **Step 2: Run typecheck**
 
-Run: `pnpm --filter @metaplex-agent/shared build && pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared build && pnpm --filter @metaplex-foundation/core typecheck`
 Expected: No errors
 
 **Step 3: Commit**
@@ -306,7 +306,7 @@ If the user asks you to do something you don't have a tool for, let them know wh
 
 **Step 2: Run typecheck**
 
-Run: `pnpm --filter @metaplex-agent/shared build && pnpm --filter @metaplex-agent/core typecheck`
+Run: `pnpm --filter @metaplex-foundation/shared build && pnpm --filter @metaplex-foundation/core typecheck`
 Expected: No errors
 
 **Step 3: Commit**
