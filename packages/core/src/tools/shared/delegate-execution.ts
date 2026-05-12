@@ -16,7 +16,7 @@ import {
   info,
   ok,
   toToolError,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import { base58 } from '@metaplex-foundation/umi/serializers';
 
 const MAX_POLL_ATTEMPTS = 30;

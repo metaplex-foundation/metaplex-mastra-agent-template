@@ -46,7 +46,7 @@ See [Agent Modes](#agent-modes) below for the full architectural detail, and [`d
                      (WebSocket + JSON)
                             |
 +---------------------------+--------------------------+
-|                  @metaplex-agent/server               |
+|                  @metaplex-foundation/server               |
 |                                                       |
 |  - Authenticates WebSocket connections                |
 |  - Manages per-session wallet state                   |
@@ -57,7 +57,7 @@ See [Agent Modes](#agent-modes) below for the full architectural detail, and [`d
           |                            |
           v                            v
 +---------+----------+   +------------+---------------+
-| @metaplex-agent/core|   | @metaplex-agent/shared      |
+| @metaplex-foundation/core|   | @metaplex-foundation/shared      |
 |                     |   |                              |
 | - Mastra Agent def  |   | - PlexChat protocol types    |
 | - System prompt     |   | - Env config (Zod-validated) |
@@ -221,7 +221,7 @@ metaplex-agent-template/
     bootstrap.ts                # Template pruner -- pnpm bootstrap [public|autonomous]
 
   packages/
-    core/                       # @metaplex-agent/core
+    core/                       # @metaplex-foundation/core
       src/
         create-agent.ts         # Factory: returns public or autonomous agent
         agent-public.ts         # Public-mode Mastra Agent definition
@@ -247,13 +247,13 @@ metaplex-agent-template/
             transfer-sol.ts       # Transfer SOL from user wallet
             transfer-token.ts     # Transfer SPL tokens from user wallet
 
-    server/                     # @metaplex-agent/server
+    server/                     # @metaplex-foundation/server
       src/
         index.ts                # Entry point -- creates and starts the server
         websocket.ts            # PlexChatServer class (auth, routing, streaming)
         session.ts              # Per-connection Session (state, send, cleanup)
 
-    shared/                     # @metaplex-agent/shared
+    shared/                     # @metaplex-foundation/shared
       src/
         config.ts               # Zod-validated env config loader + AGENT_KEYPAIR decoder
         umi.ts                  # createUmi() -- Umi factory with keypair identity
@@ -297,7 +297,7 @@ Here is an example read-only tool placed in `shared/`:
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { publicKey } from '@metaplex-foundation/umi';
-import { createUmi } from '@metaplex-agent/shared';
+import { createUmi } from '@metaplex-foundation/shared';
 
 export const getAccountInfo = createTool({
   id: 'get-account-info',
@@ -354,7 +354,7 @@ That is all that is needed. Mastra automatically exposes registered tools to the
 
 ### 3. Tools that write transactions
 
-For tools that build and submit transactions, use the `submitOrSend` helper from `@metaplex-agent/shared`. This function handles both agent modes automatically:
+For tools that build and submit transactions, use the `submitOrSend` helper from `@metaplex-foundation/shared`. This function handles both agent modes automatically:
 
 - **Public mode:** serializes the transaction to base64, pushes it to the connected client, and **awaits** the user's signature. Returns the confirmed signature (or throws on rejection/timeout).
 - **Autonomous mode:** signs with the agent keypair and submits directly to the network. Returns the signature.
@@ -364,7 +364,7 @@ Either way, `submitOrSend` returns a real `Promise<string>` resolving to the bas
 See `packages/core/src/tools/public/transfer-sol.ts` for the full pattern. The key parts:
 
 ```typescript
-import { submitOrSend, createUmi, readAgentContext, ok, err } from '@metaplex-agent/shared';
+import { submitOrSend, createUmi, readAgentContext, ok, err } from '@metaplex-foundation/shared';
 
 // Inside your tool's execute function:
 execute: async ({ destination, amount }, { requestContext }) => {
@@ -382,7 +382,7 @@ execute: async ({ destination, amount }, { requestContext }) => {
       message: `Transfer ${amount} SOL to ${destination}`,
     });
 
-    // Use the ok()/info()/err() helpers from @metaplex-agent/shared for a
+    // Use the ok()/info()/err() helpers from @metaplex-foundation/shared for a
     // consistent ToolResult<T> shape the LLM can branch on (`status` field).
     return ok({ signature, message: `Done. Signature: ${signature}` });
   } catch (e) {
@@ -491,7 +491,7 @@ The `dev` command builds `shared` and `core` first, then uses `tsx watch` to run
 
 ```bash
 pnpm build
-pnpm --filter @metaplex-agent/server start
+pnpm --filter @metaplex-foundation/server start
 ```
 
 This compiles TypeScript to JavaScript in each package's `dist/` folder, then starts the server from the compiled output.

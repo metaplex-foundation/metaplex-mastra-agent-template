@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # -----------------------------------------------------------------------------
-# Dockerfile for @metaplex-agent/server
+# Dockerfile for @metaplex-foundation/server
 #
 # Multi-stage build: installs workspace deps with pnpm, compiles
 # shared -> core -> server, then ships the runnable tree in a slim image.
@@ -37,9 +37,9 @@ COPY packages/shared ./packages/shared
 COPY packages/core ./packages/core
 COPY packages/server ./packages/server
 
-RUN pnpm --filter @metaplex-agent/shared \
-         --filter @metaplex-agent/core \
-         --filter @metaplex-agent/server \
+RUN pnpm --filter @metaplex-foundation/shared \
+         --filter @metaplex-foundation/core \
+         --filter @metaplex-foundation/server \
          build
 
 # -----------------------------------------------------------------------------

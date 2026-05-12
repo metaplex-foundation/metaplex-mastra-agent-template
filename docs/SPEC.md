@@ -43,9 +43,9 @@ pnpm workspace (`pnpm-workspace.yaml` declares `packages/*`). Node ≥ 20, pnpm 
 ```
 metaplex-agent-template/
   packages/
-    shared/    @metaplex-agent/shared    Foundation layer (config, Umi, types, helpers)
-    core/      @metaplex-agent/core      Agent definition, system prompt, tool registry
-    server/    @metaplex-agent/server    WebSocket server (PlexChat protocol)
+    shared/    @metaplex-foundation/shared    Foundation layer (config, Umi, types, helpers)
+    core/      @metaplex-foundation/core      Agent definition, system prompt, tool registry
+    server/    @metaplex-foundation/server    WebSocket server (PlexChat protocol)
 ```
 
 The chat UI is maintained in a separate repo, [`metaplex-agent-chat-template`](../../metaplex-agent-chat-template), so a single frontend can be paired with multiple agent templates and hosted agents. Any PlexChat-compatible client works.
@@ -83,11 +83,11 @@ User (Browser/WS Client)
   │
   │  PlexChat WebSocket (JSON over WS)
   ▼
-PlexChatServer (@metaplex-agent/server)
+PlexChatServer (@metaplex-foundation/server)
   │
   │  Mastra agent.stream() with RequestContext
   ▼
-Mastra Agent (@metaplex-agent/core)
+Mastra Agent (@metaplex-foundation/core)
   │
   │  Tool execution with AgentContext
   ▼
@@ -328,9 +328,9 @@ All tools are defined with Mastra's `createTool()` pattern using Zod schemas for
 3. Import and add to the tool registry in the corresponding `index.ts`
 4. Mastra auto-exposes registered tools to the LLM
 
-For tools that write transactions, use `submitOrSend()` from `@metaplex-agent/shared` -- it handles both modes automatically. See `transfer-sol.ts` for the reference pattern.
+For tools that write transactions, use `submitOrSend()` from `@metaplex-foundation/shared` -- it handles both modes automatically. See `transfer-sol.ts` for the reference pattern.
 
-For consistent tool output shape, use the `ok()`, `info()`, and `err()` helpers from `@metaplex-agent/shared` (see `packages/shared/src/types/tool-result.ts`). Every tool return should be one of:
+For consistent tool output shape, use the `ok()`, `info()`, and `err()` helpers from `@metaplex-foundation/shared` (see `packages/shared/src/types/tool-result.ts`). Every tool return should be one of:
 
 - `ok({ ... })` -- successful result with a `status: 'success'` discriminator
 - `info({ ... })` -- informational / already-done result with `status: 'info'`

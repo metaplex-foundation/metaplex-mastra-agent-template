@@ -26,9 +26,6 @@ importers:
       '@mastra/core':
         specifier: ^1.24.0
         version: 1.25.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@3.25.76))(zod@3.25.76))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@3.25.76))(@types/json-schema@7.0.15)(bufferutil@4.1.0)(openapi-types@12.1.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      '@metaplex-agent/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@metaplex-foundation/genesis':
         specifier: ^0.35.0
         version: 0.35.0(@metaplex-foundation/umi@1.5.1)
@@ -41,6 +38,9 @@ importers:
       '@metaplex-foundation/mpl-toolbox':
         specifier: ^0.10.0
         version: 0.10.0(@metaplex-foundation/umi@1.5.1)
+      '@metaplex-foundation/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@metaplex-foundation/umi':
         specifier: ^1.1.0
         version: 1.5.1
@@ -60,10 +60,10 @@ importers:
       '@mastra/core':
         specifier: ^1.24.0
         version: 1.25.0(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6))(@standard-community/standard-openapi@0.2.9(@standard-community/standard-json@0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(quansync@0.2.11)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@4.3.6))(@types/json-schema@7.0.15)(bufferutil@4.1.0)(openapi-types@12.1.3)(utf-8-validate@6.0.6)(zod@4.3.6)
-      '@metaplex-agent/core':
+      '@metaplex-foundation/core':
         specifier: workspace:*
         version: link:../core
-      '@metaplex-agent/shared':
+      '@metaplex-foundation/shared':
         specifier: workspace:*
         version: link:../shared
       ws:
@@ -88,6 +88,9 @@ importers:
       '@metaplex-foundation/mpl-toolbox':
         specifier: ^0.10.0
         version: 0.10.0(@metaplex-foundation/umi@1.5.1)
+      '@metaplex-foundation/plexchat':
+        specifier: 0.1.0
+        version: 0.1.0
       '@metaplex-foundation/umi':
         specifier: ^1.1.0
         version: 1.5.1
@@ -376,6 +379,10 @@ packages:
     resolution: {integrity: sha512-84KD1L5cFyw5xnntHwL4uPwfcrkKSiwuDeypiVr92qCUFuF3ZENa2zlFVPu+pQcjTlod2LmEX3MhBmNjRMpdKg==}
     peerDependencies:
       '@metaplex-foundation/umi': '>= 0.8.2 <= 1'
+
+  '@metaplex-foundation/plexchat@0.1.0':
+    resolution: {integrity: sha512-NbNtZDncrvZVI7wGI+20mgtPvtnqF1iQqtKznQeEZPIHuOJSciBco5epj9oghdGSOfe4RysdfexUU0tm/wXXNQ==}
+    engines: {node: '>=20'}
 
   '@metaplex-foundation/umi-bundle-defaults@1.5.1':
     resolution: {integrity: sha512-7qoXenAkQbcj468HGAeLZDyg3eEhcS9rWAnGqjnKgWOlL1czL2Qwho0FEtqOv57IHwAJSTpbHbcvABmdpTjjdw==}
@@ -2096,6 +2103,11 @@ snapshots:
   '@metaplex-foundation/mpl-toolbox@0.10.0(@metaplex-foundation/umi@1.5.1)':
     dependencies:
       '@metaplex-foundation/umi': 1.5.1
+
+  '@metaplex-foundation/plexchat@0.1.0':
+    dependencies:
+      bs58: 6.0.0
+      tweetnacl: 1.0.3
 
   '@metaplex-foundation/umi-bundle-defaults@1.5.1(@metaplex-foundation/umi@1.5.1)(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@6.0.2)(utf-8-validate@6.0.6))':
     dependencies:

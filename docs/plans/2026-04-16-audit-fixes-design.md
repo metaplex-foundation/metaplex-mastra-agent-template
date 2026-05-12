@@ -102,7 +102,7 @@ Addresses: H-1, H-2, M-1, M-2, M-16
 - Update signature encoding to use `base58.deserialize(result.signature)[0]`
 
 ### 4.3 launch-token.ts — add missing updateConfigFromState()
-- Add `import { updateConfigFromState } from '@metaplex-agent/shared'`
+- Add `import { updateConfigFromState } from '@metaplex-foundation/shared'`
 - Call `updateConfigFromState()` after `setState()`
 
 ### 4.4 Read-only tools — add try/catch error handling

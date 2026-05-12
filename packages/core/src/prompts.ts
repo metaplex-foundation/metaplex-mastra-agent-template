@@ -1,4 +1,4 @@
-import type { AgentMode } from '@metaplex-agent/shared';
+import type { AgentMode } from '@metaplex-foundation/shared';
 import { getPersona } from './personas/index.js';
 
 /**

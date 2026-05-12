@@ -47,8 +47,8 @@ Workstreams A and B both need to know the final names of new env vars / types. T
 
 ### Verify
 
-- `pnpm --filter @metaplex-agent/server typecheck` passes.
-- `pnpm --filter @metaplex-agent/shared typecheck` passes.
+- `pnpm --filter @metaplex-foundation/server typecheck` passes.
+- `pnpm --filter @metaplex-foundation/shared typecheck` passes.
 
 ---
 
@@ -89,8 +89,8 @@ Workstreams A and B both need to know the final names of new env vars / types. T
 
 ### Verify
 
-- `pnpm --filter @metaplex-agent/shared typecheck` passes.
-- `pnpm --filter @metaplex-agent/core typecheck` passes.
+- `pnpm --filter @metaplex-foundation/shared typecheck` passes.
+- `pnpm --filter @metaplex-foundation/core typecheck` passes.
 
 ---
 
@@ -119,8 +119,8 @@ Workstreams A and B both need to know the final names of new env vars / types. T
 
 ### Verify
 
-- `pnpm --filter @metaplex-agent/ui typecheck` passes.
-- `pnpm --filter @metaplex-agent/ui build` passes.
+- `pnpm --filter @metaplex-foundation/ui typecheck` passes.
+- `pnpm --filter @metaplex-foundation/ui build` passes.
 
 ---
 

@@ -28,7 +28,7 @@
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
-import { buildSiwsMessage } from '@metaplex-agent/shared';
+import { buildSiwsMessage } from '@metaplex-foundation/shared';
 
 const WS_URL = process.env.WS_URL ?? 'ws://localhost:3002';
 const WS_ORIGIN = process.env.WS_ORIGIN ?? 'http://localhost:3001';

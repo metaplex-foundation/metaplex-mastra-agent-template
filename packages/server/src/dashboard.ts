@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { getConfig, getState } from '@metaplex-agent/shared';
+import { getConfig, getState } from '@metaplex-foundation/shared';
 
 /**
  * `/_dashboard` — owner-gated worker-loop snapshot.

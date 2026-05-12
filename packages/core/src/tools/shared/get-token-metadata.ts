@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { BASE58_ADDRESS_RE, createUmi, err, ok, toToolError } from '@metaplex-agent/shared';
+import { BASE58_ADDRESS_RE, createUmi, err, ok, toToolError } from '@metaplex-foundation/shared';
 
 export const getTokenMetadata = createTool({
   id: 'get-token-metadata',

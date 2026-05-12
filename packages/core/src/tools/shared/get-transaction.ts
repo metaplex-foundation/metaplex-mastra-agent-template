@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { BASE58_SIGNATURE_RE, createUmi, err, info, ok, toToolError } from '@metaplex-agent/shared';
+import { BASE58_SIGNATURE_RE, createUmi, err, info, ok, toToolError } from '@metaplex-foundation/shared';
 
 export const getTransaction = createTool({
   id: 'get-transaction',

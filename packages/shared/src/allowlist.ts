@@ -1,4 +1,7 @@
-export type AuthMode = 'owner' | 'allowlist' | 'open';
+// AuthMode is part of the PlexChat protocol — import from the shared
+// package so the type stays in lockstep with the chat UI's expectations.
+import type { AuthMode } from '@metaplex-foundation/plexchat';
+export type { AuthMode };
 
 export interface AuthCheck {
   mode: AuthMode;

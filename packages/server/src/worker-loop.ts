@@ -9,10 +9,10 @@ import {
   setLastTickAt,
   type AgentContext,
   type TxCounter,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import { publicKey as toPublicKey } from '@metaplex-foundation/umi';
 import { RequestContext } from '@mastra/core/request-context';
-import type { createAgent } from '@metaplex-agent/core';
+import type { createAgent } from '@metaplex-foundation/core';
 import { buildTickPrompt, type TickContext } from './build-tick-prompt.js';
 
 type Agent = ReturnType<typeof createAgent>;

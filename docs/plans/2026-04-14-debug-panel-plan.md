@@ -122,7 +122,7 @@ export type ServerMessage =
 
 **Step 3: Build shared package and verify**
 
-Run: `pnpm --filter @metaplex-agent/shared build`
+Run: `pnpm --filter @metaplex-foundation/shared build`
 Expected: Clean build, no errors.
 
 **Step 4: Commit**
@@ -159,7 +159,7 @@ export { toolNames } from './tools/index.js';
 
 **Step 3: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/core build`
+Run: `pnpm --filter @metaplex-foundation/core build`
 Expected: Clean build.
 
 **Step 4: Commit**
@@ -182,13 +182,13 @@ Replace `agent.generate()` with `agent.stream()` and emit debug events over WebS
 Update the imports at line 1-12 of `websocket.ts`. Add `toolNames` to the core import:
 
 ```typescript
-import { createAgent } from '@metaplex-agent/core';
+import { createAgent } from '@metaplex-foundation/core';
 ```
 
 becomes:
 
 ```typescript
-import { createAgent, toolNames } from '@metaplex-agent/core';
+import { createAgent, toolNames } from '@metaplex-foundation/core';
 ```
 
 Also add `DebugMessage` to the shared import (for type safety on broadcast):
@@ -202,7 +202,7 @@ import {
   type AgentContext,
   type ClientMessage,
   type DebugContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 ```
 
 **Step 2: Add emitContext helper method**
@@ -414,12 +414,12 @@ Replace the entire `handleChatMessage` method (lines 133-204) with:
 
 **Step 6: Build and verify**
 
-Run: `pnpm --filter @metaplex-agent/server build`
+Run: `pnpm --filter @metaplex-foundation/server build`
 Expected: Clean build.
 
 **Step 7: Manual test**
 
-Run the server with `pnpm --filter @metaplex-agent/server dev`. Connect with the UI or a WebSocket client. Send a message and verify:
+Run the server with `pnpm --filter @metaplex-foundation/server dev`. Connect with the UI or a WebSocket client. Send a message and verify:
 1. Debug events appear in WebSocket traffic (check browser DevTools Network > WS tab)
 2. The final `message` event still arrives with the complete text
 3. `debug:context` arrives on connection
@@ -449,7 +449,7 @@ import type {
   ServerMessage,
   ServerTransaction,
   DebugMessage,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 
 export interface ChatMessage {
   id: string;
@@ -653,7 +653,7 @@ Update the `send` function to log outgoing messages:
 
 **Step 8: Verify UI builds**
 
-Run: `pnpm --filter @metaplex-agent/ui typecheck`
+Run: `pnpm --filter @metaplex-foundation/ui typecheck`
 Expected: No type errors.
 
 **Step 9: Commit**
@@ -677,7 +677,7 @@ New hook that accumulates debug events into structured state for the panel.
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DebugMessage, DebugContext } from '@metaplex-agent/shared';
+import type { DebugMessage, DebugContext } from '@metaplex-foundation/shared';
 
 // --- Types ---
 
@@ -950,7 +950,7 @@ export function useDebugPanel(): UseDebugPanelReturn {
 
 **Step 2: Verify types**
 
-Run: `pnpm --filter @metaplex-agent/ui typecheck`
+Run: `pnpm --filter @metaplex-foundation/ui typecheck`
 Expected: No type errors.
 
 **Step 3: Commit**
@@ -1212,7 +1212,7 @@ Shows agent configuration, connection state, conversation info, and registered t
 'use client';
 
 import { useState } from 'react';
-import type { DebugContext } from '@metaplex-agent/shared';
+import type { DebugContext } from '@metaplex-foundation/shared';
 import type { ChatMessage } from '@/hooks/use-plexchat';
 
 interface ContextTabProps {
@@ -1569,7 +1569,7 @@ Container component with tab bar that renders the active tab.
 'use client';
 
 import type { DebugTab, MessageTrace, SessionTotals } from '@/hooks/use-debug-panel';
-import type { DebugContext } from '@metaplex-agent/shared';
+import type { DebugContext } from '@metaplex-foundation/shared';
 import type { ChatMessage, WsLogEntry } from '@/hooks/use-plexchat';
 import { StepsTab } from './steps-tab';
 import { ContextTab } from './context-tab';
@@ -1694,7 +1694,7 @@ Replace the entire content of `packages/ui/src/app/page.tsx`:
 import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import type { ServerTransaction } from '@metaplex-agent/shared';
+import type { ServerTransaction } from '@metaplex-foundation/shared';
 import { usePlexChat } from '@/hooks/use-plexchat';
 import { useDebugPanel } from '@/hooks/use-debug-panel';
 import { ChatPanel } from '@/components/chat-panel';
@@ -1823,7 +1823,7 @@ export default function Home() {
 
 **Step 3: Verify types compile**
 
-Run: `pnpm --filter @metaplex-agent/ui typecheck`
+Run: `pnpm --filter @metaplex-foundation/ui typecheck`
 Expected: No type errors.
 
 **Step 4: Commit**
@@ -1851,8 +1851,8 @@ If there are TypeScript errors, fix them. Common issues to watch for:
 **Step 2: Start dev servers**
 
 Run in separate terminals:
-- `pnpm --filter @metaplex-agent/server dev`
-- `pnpm --filter @metaplex-agent/ui dev`
+- `pnpm --filter @metaplex-foundation/server dev`
+- `pnpm --filter @metaplex-foundation/ui dev`
 
 **Step 3: Manual verification checklist**
 

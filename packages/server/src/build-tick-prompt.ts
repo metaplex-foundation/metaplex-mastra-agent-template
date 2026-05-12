@@ -1,4 +1,4 @@
-import type { Goal, Task, JournalEntry } from '@metaplex-agent/shared';
+import type { Goal, Task, JournalEntry } from '@metaplex-foundation/shared';
 
 /**
  * Snapshot of everything the LLM should consider during a tick. Built

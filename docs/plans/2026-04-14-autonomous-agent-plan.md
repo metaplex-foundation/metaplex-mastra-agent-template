@@ -24,21 +24,21 @@ Install the new packages needed for agent registration, Core Execute, and token 
 
 ```bash
 cd /Users/kelliott/Metaplex/AI/UsefulAgents/014-agent-template
-pnpm --filter @metaplex-agent/shared add @metaplex-foundation/mpl-core @metaplex-foundation/genesis
+pnpm --filter @metaplex-foundation/shared add @metaplex-foundation/mpl-core @metaplex-foundation/genesis
 ```
 
 **Step 2: Add dependencies to core package**
 
 ```bash
-pnpm --filter @metaplex-agent/core add @metaplex-foundation/mpl-agent-registry @metaplex-foundation/mpl-core
+pnpm --filter @metaplex-foundation/core add @metaplex-foundation/mpl-agent-registry @metaplex-foundation/mpl-core
 ```
 
 **Step 3: Verify install**
 
 ```bash
 pnpm install
-pnpm --filter @metaplex-agent/shared typecheck
-pnpm --filter @metaplex-agent/core typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
+pnpm --filter @metaplex-foundation/core typecheck
 ```
 
 Expected: Clean install, no type errors.
@@ -129,9 +129,9 @@ const context: AgentContext = {
 **Step 6: Typecheck**
 
 ```bash
-pnpm --filter @metaplex-agent/shared typecheck
-pnpm --filter @metaplex-agent/core typecheck
-pnpm --filter @metaplex-agent/server typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
+pnpm --filter @metaplex-foundation/core typecheck
+pnpm --filter @metaplex-foundation/server typecheck
 ```
 
 Expected: No type errors.
@@ -217,7 +217,7 @@ export * from './execute.js';
 **Step 3: Typecheck**
 
 ```bash
-pnpm --filter @metaplex-agent/shared typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
 ```
 
 Expected: No type errors.
@@ -417,7 +417,7 @@ export * from './jupiter.js';
 **Step 3: Typecheck**
 
 ```bash
-pnpm --filter @metaplex-agent/shared typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
 ```
 
 Expected: No type errors. If there are Umi type mismatches with the transaction signing flow, we may need to adjust. The core pattern is correct but the exact Umi transaction API may need tweaking during implementation.
@@ -533,10 +533,10 @@ export const toolNames = publicToolNames;
 **Step 5: Typecheck**
 
 ```bash
-pnpm --filter @metaplex-agent/core typecheck
+pnpm --filter @metaplex-foundation/core typecheck
 ```
 
-Expected: No type errors. The import paths inside the moved tool files don't need changing because they use package imports (`@metaplex-agent/shared`, `@mastra/core/tools`) not relative paths.
+Expected: No type errors. The import paths inside the moved tool files don't need changing because they use package imports (`@metaplex-foundation/shared`, `@mastra/core/tools`) not relative paths.
 
 **Step 6: Commit**
 
@@ -595,7 +595,7 @@ Create `packages/core/src/agent-autonomous.ts`:
 
 ```typescript
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 import { sharedTools } from './tools/shared/index.js';
 import { autonomousTools } from './tools/autonomous/index.js';
 
@@ -692,7 +692,7 @@ export function createAutonomousAgent() {
 Create `packages/core/src/create-agent.ts`:
 
 ```typescript
-import { getConfig } from '@metaplex-agent/shared';
+import { getConfig } from '@metaplex-foundation/shared';
 import { createPublicAgent } from './agent-public.js';
 import { createAutonomousAgent } from './agent-autonomous.js';
 
@@ -721,7 +721,7 @@ export { publicAgentTools, toolNames } from './tools/index.js';
 This will fail because `autonomousTools` doesn't exist yet. That's expected — we'll create it in the next task. For now, verify the public agent path compiles:
 
 ```bash
-pnpm --filter @metaplex-agent/core typecheck 2>&1 | head -20
+pnpm --filter @metaplex-foundation/core typecheck 2>&1 | head -20
 ```
 
 Expected: Errors only about missing `./tools/autonomous/index.js` module.
@@ -752,7 +752,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { publicKey } from '@metaplex-foundation/umi';
 import { mintAndSubmitAgent } from '@metaplex-foundation/mpl-agent-registry';
-import { createUmi, getConfig, type AgentContext } from '@metaplex-agent/shared';
+import { createUmi, getConfig, type AgentContext } from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const registerAgent = createTool({
@@ -851,7 +851,7 @@ import {
   findAgentIdentityV1Pda,
   findExecutiveProfileV1Pda,
 } from '@metaplex-foundation/mpl-agent-registry';
-import { createUmi, getAgentPda, type AgentContext } from '@metaplex-agent/shared';
+import { createUmi, getAgentPda, type AgentContext } from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const delegateExecution = createTool({
@@ -931,7 +931,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { publicKey } from '@metaplex-foundation/umi';
 import { createAndRegisterLaunch } from '@metaplex-foundation/genesis/api';
-import { createUmi, getConfig, type AgentContext } from '@metaplex-agent/shared';
+import { createUmi, getConfig, type AgentContext } from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const launchToken = createTool({
@@ -1061,7 +1061,7 @@ import {
   getAgentPda,
   executeSwap,
   type AgentContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const swapToken = createTool({
@@ -1135,7 +1135,7 @@ import {
   executeSwap,
   SOL_MINT,
   type AgentContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const buybackToken = createTool({
@@ -1225,7 +1225,7 @@ import {
   executeSwap,
   SOL_MINT,
   type AgentContext,
-} from '@metaplex-agent/shared';
+} from '@metaplex-foundation/shared';
 import type { RequestContext } from '@mastra/core/request-context';
 
 export const sellToken = createTool({
@@ -1386,13 +1386,13 @@ export { publicAgentTools, autonomousAgentTools, toolNames, publicToolNames, aut
 In `packages/server/src/websocket.ts`, the `emitContext` method sends `toolNames` to the debug panel. Update the import to dynamically pick the right tool names. Change the import:
 
 ```typescript
-import { createAgent, toolNames } from '@metaplex-agent/core';
+import { createAgent, toolNames } from '@metaplex-foundation/core';
 ```
 
 to:
 
 ```typescript
-import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-agent/core';
+import { createAgent, publicToolNames, autonomousToolNames } from '@metaplex-foundation/core';
 ```
 
 And update `emitContext` to pick the right list:
@@ -1419,9 +1419,9 @@ private emitContext(): void {
 **Step 5: Full typecheck**
 
 ```bash
-pnpm --filter @metaplex-agent/shared typecheck
-pnpm --filter @metaplex-agent/core typecheck
-pnpm --filter @metaplex-agent/server typecheck
+pnpm --filter @metaplex-foundation/shared typecheck
+pnpm --filter @metaplex-foundation/core typecheck
+pnpm --filter @metaplex-foundation/server typecheck
 ```
 
 Expected: No type errors across all packages. If there are errors, they'll likely be around:
@@ -1434,9 +1434,9 @@ Fix any type errors before committing.
 **Step 6: Full build**
 
 ```bash
-pnpm --filter @metaplex-agent/shared build
-pnpm --filter @metaplex-agent/core build
-pnpm --filter @metaplex-agent/server build
+pnpm --filter @metaplex-foundation/shared build
+pnpm --filter @metaplex-foundation/core build
+pnpm --filter @metaplex-foundation/server build
 ```
 
 Expected: Clean builds.
@@ -1476,7 +1476,7 @@ AGENT_TOKEN_MINT=
 Set `AGENT_MODE=public` in `.env` and start the server:
 
 ```bash
-pnpm --filter @metaplex-agent/server build && node packages/server/dist/index.js
+pnpm --filter @metaplex-foundation/server build && node packages/server/dist/index.js
 ```
 
 Expected: Server starts, logs "Agent mode: public", accepts WebSocket connections. The public agent should work exactly as before.
@@ -1486,7 +1486,7 @@ Expected: Server starts, logs "Agent mode: public", accepts WebSocket connection
 Set `AGENT_MODE=autonomous` in `.env` (requires `AGENT_KEYPAIR` to be set) and start the server:
 
 ```bash
-pnpm --filter @metaplex-agent/server build && node packages/server/dist/index.js
+pnpm --filter @metaplex-foundation/server build && node packages/server/dist/index.js
 ```
 
 Expected: Server starts, logs "Agent mode: autonomous". The autonomous agent should respond to messages and have the registration/DeFi tools available.

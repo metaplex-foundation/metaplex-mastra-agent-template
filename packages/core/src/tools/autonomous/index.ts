@@ -1,4 +1,4 @@
-import { withAuth } from '@metaplex-agent/shared';
+import { withAuth } from '@metaplex-foundation/shared';
 import {
   setGoal,
   closeGoalTool,

@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { ok, setPaused } from '@metaplex-agent/shared';
+import { ok, setPaused } from '@metaplex-foundation/shared';
 
 /**
  * Toggle the worker-loop pause flag. When paused=true, the worker skips

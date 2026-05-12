@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
-import { BASE58_ADDRESS_RE, err, getConfig, info, ok, toToolError } from '@metaplex-agent/shared';
+import { BASE58_ADDRESS_RE, err, getConfig, info, ok, toToolError } from '@metaplex-foundation/shared';
 
 export const getTokenPrice = createTool({
   id: 'get-token-price',

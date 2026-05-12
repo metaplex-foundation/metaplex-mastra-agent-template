@@ -63,7 +63,7 @@ async function checkEnv(): Promise<void> {
   add('.env file', 'ok', envPath);
 
   try {
-    const { getConfig } = await import('@metaplex-agent/shared');
+    const { getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
     add('config validation', 'ok', `AGENT_MODE=${cfg.AGENT_MODE}, AGENT_AUTH_MODE=${cfg.AGENT_AUTH_MODE}`);
     return;
@@ -102,7 +102,7 @@ function formatSol(basisPoints: bigint | number | string | null | undefined, fra
 
 async function checkKeypair(): Promise<void> {
   try {
-    const { createUmi, getAgentPda, getConfig } = await import('@metaplex-agent/shared');
+    const { createUmi, getAgentPda, getConfig } = await import('@metaplex-foundation/shared');
     const { publicKey } = await import('@metaplex-foundation/umi');
     const cfg = getConfig();
     const umi = createUmi();
@@ -124,7 +124,7 @@ async function checkKeypair(): Promise<void> {
 // ---- 3. RPC reachability ----
 async function checkRpc(): Promise<void> {
   try {
-    const { createUmi, getConfig } = await import('@metaplex-agent/shared');
+    const { createUmi, getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
     const umi = createUmi();
     const slot = await umi.rpc.getSlot();
@@ -137,7 +137,7 @@ async function checkRpc(): Promise<void> {
 // ---- 4. LLM key presence ----
 async function checkLlmKey(): Promise<void> {
   try {
-    const { getConfig } = await import('@metaplex-agent/shared');
+    const { getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
     const provider = cfg.LLM_MODEL.split('/')[0]?.toLowerCase();
     const map: Record<string, string> = {
@@ -165,7 +165,7 @@ async function checkLlmKey(): Promise<void> {
 // ---- 5. wallets.allowlist.json parses (if used) ----
 async function checkAllowlist(): Promise<void> {
   try {
-    const { getConfig } = await import('@metaplex-agent/shared');
+    const { getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
     const path = resolve(ROOT, cfg.WALLET_ALLOWLIST_PATH);
     if (!existsSync(path)) {
@@ -203,13 +203,13 @@ function checkHostingPlatform(): void {
 // ---- 7. SIWS smoke against running server ----
 async function checkSiwsSmoke(): Promise<void> {
   try {
-    const { getConfig } = await import('@metaplex-agent/shared');
+    const { getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
     const port = cfg.WEB_CHANNEL_PORT;
     const ws = await import('ws');
     const nacl = (await import('tweetnacl')).default;
     const { default: bs58 } = await import('bs58');
-    const { buildSiwsMessage } = await import('@metaplex-agent/shared');
+    const { buildSiwsMessage } = await import('@metaplex-foundation/shared');
 
     const kp = nacl.sign.keyPair();
     const pubkeyBase58 = bs58.encode(kp.publicKey);
