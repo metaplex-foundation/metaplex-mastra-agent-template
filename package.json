@@ -12,7 +12,12 @@
     "build": "pnpm -r build",
     "clean": "pnpm -r clean",
     "typecheck": "pnpm --filter @metaplex-foundation/core... build && pnpm -r typecheck",
-    "bootstrap": "tsx scripts/bootstrap.ts"
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "test": "pnpm --filter @metaplex-foundation/core... build && pnpm -r test",
+    "test:coverage": "pnpm --filter @metaplex-foundation/core... build && pnpm -r test:coverage",
+    "test:unit": "pnpm -r test:unit",
+    "test:integration": "pnpm --filter @metaplex-foundation/core... build && pnpm -r test:integration",
+    "test:e2e": "pnpm --filter @metaplex-foundation/server build && pnpm --filter @metaplex-foundation/server test:e2e"
   },
   "engines": {
     "node": ">=20"
