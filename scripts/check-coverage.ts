@@ -30,24 +30,26 @@ async function collectLcovFiles(): Promise<string[]> {
   return files;
 }
 
-function parseLcov(lcovPath: string): Map<string, { LF: number; LH: number }> {
+function parseLcov(lcovPath: string): Map<string, { lines: Set<number>; covered: Set<number> }> {
   const text = readFileSync(lcovPath, 'utf8');
   const baseDir = dirname(dirname(lcovPath)); // strip /coverage/lcov.info → package root
-  const result = new Map<string, { LF: number; LH: number }>();
+  const result = new Map<string, { lines: Set<number>; covered: Set<number> }>();
   let currentSF: string | null = null;
-  let LF = 0;
-  let LH = 0;
   for (const line of text.split('\n')) {
     if (line.startsWith('SF:')) {
       currentSF = resolve(baseDir, line.slice(3));
-      LF = 0;
-      LH = 0;
-    } else if (line.startsWith('LF:')) {
-      LF = Number(line.slice(3));
-    } else if (line.startsWith('LH:')) {
-      LH = Number(line.slice(3));
-    } else if (line.startsWith('end_of_record') && currentSF) {
-      result.set(currentSF, { LF, LH });
+      if (!result.has(currentSF)) {
+        result.set(currentSF, { lines: new Set(), covered: new Set() });
+      }
+    } else if (line.startsWith('DA:') && currentSF) {
+      const comma = line.indexOf(',', 3);
+      if (comma === -1) continue;
+      const lineNum = Number(line.slice(3, comma));
+      const count = Number(line.slice(comma + 1));
+      const entry = result.get(currentSF)!;
+      entry.lines.add(lineNum);
+      if (count > 0) entry.covered.add(lineNum);
+    } else if (line.startsWith('end_of_record')) {
       currentSF = null;
     }
   }
@@ -65,10 +67,19 @@ async function check(): Promise<void> {
     console.error('no lcov files found — run pnpm test:coverage first');
     process.exit(1);
   }
-  const coverage = new Map<string, { LF: number; LH: number }>();
+  const coverage = new Map<string, { lines: Set<number>; covered: Set<number> }>();
   for (const lcov of lcovFiles) {
     for (const [path, stats] of parseLcov(lcov)) {
-      coverage.set(path, stats);
+      const existing = coverage.get(path);
+      if (existing) {
+        for (const l of stats.lines) existing.lines.add(l);
+        for (const l of stats.covered) existing.covered.add(l);
+      } else {
+        coverage.set(path, {
+          lines: new Set(stats.lines),
+          covered: new Set(stats.covered),
+        });
+      }
     }
   }
 
@@ -77,9 +88,9 @@ async function check(): Promise<void> {
   const uncovered: { file: string; lines: number }[] = [];
   for (const src of sourceFiles) {
     const lc = coverage.get(src);
-    if (lc) {
-      totalLines += lc.LF;
-      coveredLines += lc.LH;
+    if (lc && lc.lines.size > 0) {
+      totalLines += lc.lines.size;
+      coveredLines += lc.covered.size;
     } else {
       const lines = countExecutableLines(readFileSync(src, 'utf8'));
       totalLines += lines;
