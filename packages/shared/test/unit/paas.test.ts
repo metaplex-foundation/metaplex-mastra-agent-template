@@ -1,6 +1,6 @@
 import { test, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { detectPaas } from '../src/paas.js';
+import { detectPaas } from '../../src/paas.js';
 
 const PAAS_KEYS = [
   'RAILWAY_STATIC_URL',

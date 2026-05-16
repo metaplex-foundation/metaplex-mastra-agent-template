@@ -9,7 +9,10 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx"
+    "test": "node --test --import tsx --test-reporter spec 'test/**/*.test.ts'",
+    "test:unit": "node --test --import tsx --test-reporter spec 'test/unit/**/*.test.ts'",
+    "test:integration": "node --test --import tsx --test-reporter spec 'test/integration/**/*.test.ts'",
+    "test:coverage": "node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
   },
   "dependencies": {
     "@metaplex-foundation/plexchat": "0.1.0",

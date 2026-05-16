@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { WalletRateLimiter } from '../src/wallet-rate-limit.js';
+import { WalletRateLimiter } from '../../src/wallet-rate-limit.js';
 
 test('WalletRateLimiter allows up to max events in window', () => {
   let now = 0;

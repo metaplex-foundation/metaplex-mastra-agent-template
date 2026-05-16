@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { buildRegistrationBanner } from '../src/registration-banner.js';
+import { buildRegistrationBanner } from '../../src/registration-banner.js';
 
 test('banner contains the envKey=address line for copy-paste', () => {
   const banner = buildRegistrationBanner({

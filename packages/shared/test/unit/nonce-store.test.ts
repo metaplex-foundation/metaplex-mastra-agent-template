@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { NonceStore } from '../src/nonce-store.js';
+import { NonceStore } from '../../src/nonce-store.js';
 
 test('NonceStore.issue produces a 32-hex nonce with iso timestamps', () => {
   const store = new NonceStore({ ttlMs: 60_000 });

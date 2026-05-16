@@ -7,7 +7,7 @@ import {
   loadAgentConfigFile,
   agentConfigToEnvDefaults,
   applyAgentConfigToEnv,
-} from '../src/agent-config.js';
+} from '../../src/agent-config.js';
 
 const tmpFiles: string[] = [];
 

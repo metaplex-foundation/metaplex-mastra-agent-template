@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { AllowlistFile } from '../src/allowlist-file.js';
+import { AllowlistFile } from '../../src/allowlist-file.js';
 
 const tmpDirs: string[] = [];
 

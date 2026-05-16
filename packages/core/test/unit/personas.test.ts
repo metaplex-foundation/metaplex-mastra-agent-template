@@ -5,8 +5,8 @@ import {
   personas,
   personaNames,
   defaultPersona,
-} from '../src/personas/index.js';
-import { buildSystemPrompt } from '../src/prompts.js';
+} from '../../src/personas/index.js';
+import { buildSystemPrompt } from '../../src/prompts.js';
 
 test('getPersona returns default for undefined input', () => {
   assert.equal(getPersona().name, 'default');

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import nacl from 'tweetnacl';
 import bs58 from 'bs58';
-import { buildSiwsMessage, verifySiwsSignature } from '../src/siws.js';
+import { buildSiwsMessage, verifySiwsSignature } from '../../src/siws.js';
 
 test('buildSiwsMessage produces canonical multiline string', () => {
   const msg = buildSiwsMessage({
