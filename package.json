@@ -20,7 +20,7 @@
     "test:e2e": "pnpm --filter @metaplex-foundation/server build && pnpm --filter @metaplex-foundation/server test:e2e"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "packageManager": "pnpm@10.33.4",
   "devDependencies": {
