@@ -104,3 +104,89 @@ test('default persona body matches the default persona definition', () => {
   assert.ok(sample, 'default persona missing expected section header');
   assert.ok(prompt.includes(sample), 'default persona body not included in prompt');
 });
+
+// --- Persona module load smoke ----------------------------------------
+//
+// Each bundled persona file should be importable on its own. This guards
+// against a future regression where a persona file accidentally introduces
+// a top-level side effect (env read, fs touch) that breaks isolated
+// loading. Dynamic imports keep the test honest — bundlers can't tree-
+// shake them away.
+
+const BUNDLED_PERSONA_FILES = [
+  'default',
+  'token-launch-concierge',
+  'wallet-cleanup-bot',
+  'treasury-rebalancer',
+] as const;
+
+for (const slug of BUNDLED_PERSONA_FILES) {
+  test(`persona file "${slug}" loads without error and exports a valid Persona`, async () => {
+    // Dynamic import — tsx resolves the .js suffix to the .ts source at
+    // test time.
+    const mod = await import(`../../src/personas/${slug}.js`);
+    const persona =
+      mod.default ??
+      mod.defaultPersona ??
+      mod.tokenLaunchConcierge ??
+      mod.walletCleanupBot ??
+      mod.treasuryRebalancer ??
+      Object.values(mod).find(
+        (v): v is { name: string; description: string; body: string } =>
+          typeof v === 'object' && v !== null && 'body' in (v as object),
+      );
+    assert.ok(persona, `persona file ${slug} did not export a Persona-shaped value`);
+    assert.equal(
+      typeof (persona as { name: unknown }).name,
+      'string',
+      `${slug}.name must be a string`,
+    );
+    assert.ok(
+      (persona as { name: string }).name.length > 0,
+      `${slug}.name must be non-empty`,
+    );
+    assert.equal(
+      typeof (persona as { description: unknown }).description,
+      'string',
+      `${slug}.description must be a string`,
+    );
+    assert.equal(
+      typeof (persona as { body: unknown }).body,
+      'string',
+      `${slug}.body must be a string`,
+    );
+    assert.ok(
+      (persona as { body: string }).body.length > 0,
+      `${slug}.body must be non-empty`,
+    );
+  });
+}
+
+test('every persona body is a non-empty string with substantive content', () => {
+  for (const [slug, persona] of Object.entries(personas)) {
+    assert.equal(typeof persona.body, 'string', `${slug}.body must be a string`);
+    assert.ok(persona.body.trim().length > 0, `${slug}.body must be non-empty`);
+    // Substantive content threshold — guards against accidentally
+    // shipping a one-line stub.
+    assert.ok(persona.body.length > 100, `${slug}.body looks too short (${persona.body.length} chars)`);
+  }
+});
+
+test('getPersona fallback to default is byte-identical to the explicit default', () => {
+  // The contract: an unknown slug must produce the *same* persona object
+  // as the default, not a fresh-but-equivalent one. This matters because
+  // downstream code (logging, comparisons) may rely on reference equality.
+  const explicit = getPersona('default');
+  const fallback = getPersona('completely-unknown-slug-xyz');
+  assert.equal(fallback, explicit, 'fallback should return the same default reference');
+  assert.equal(fallback.name, 'default');
+});
+
+test('every persona in the registry can be retrieved by its slug', () => {
+  // Round-trip every registered persona through getPersona to prove the
+  // registry's keys match the slugs the resolver expects.
+  for (const slug of Object.keys(personas)) {
+    const resolved = getPersona(slug);
+    assert.equal(resolved.name, slug, `getPersona("${slug}") returned wrong persona`);
+  }
+});
