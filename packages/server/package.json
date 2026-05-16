@@ -14,7 +14,7 @@
     "test:unit": "node --test --import tsx --test-reporter spec 'test/unit/**/*.test.ts'",
     "test:integration": "node --test --import tsx --test-reporter spec 'test/integration/**/*.test.ts'",
     "test:e2e": "node --test --import tsx --test-reporter spec --test-timeout=30000 'test/e2e/**/*.test.ts'",
-    "test:coverage": "node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
+    "test:coverage": "mkdir -p coverage && node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
   },
   "dependencies": {
     "@mastra/core": "^1.24.0",
