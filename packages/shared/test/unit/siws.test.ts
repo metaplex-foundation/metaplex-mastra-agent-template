@@ -66,3 +66,72 @@ test('verifySiwsSignature rejects malformed base58 inputs', () => {
     false,
   );
 });
+
+test('buildSiwsMessage handles empty agentName with an empty name slot', () => {
+  const msg = buildSiwsMessage({
+    agentName: '',
+    agentAsset: null,
+    network: 'solana-devnet',
+    nonce: 'n',
+    issuedAt: 'i',
+    expiresAt: 'e',
+  });
+  // The "Sign in to " prefix is preserved verbatim; the name slot is empty, so
+  // the message begins with "Sign in to \n\n" (trailing space before newline).
+  assert.equal(msg.startsWith('Sign in to \n\n'), true);
+});
+
+test('buildSiwsMessage preserves unicode bytes in agentName exactly', () => {
+  // Guard against any future NFC/NFKC normalization slipping into the builder.
+  // The bytes the wallet signs MUST be byte-identical to what the server
+  // verifies — normalization would silently break verification.
+  const name = 'Treasury 中文 🤖';
+  const msg = buildSiwsMessage({
+    agentName: name,
+    agentAsset: null,
+    network: 'solana-devnet',
+    nonce: 'n',
+    issuedAt: 'i',
+    expiresAt: 'e',
+  });
+  const expected =
+    `Sign in to ${name}\n` +
+    '\n' +
+    'Agent: unregistered\n' +
+    'Network: solana-devnet\n' +
+    'Nonce: n\n' +
+    'Issued: i\n' +
+    'Expires: e';
+  assert.equal(msg, expected);
+  // Belt-and-suspenders: encoded byte length must match the raw template, with
+  // no normalization shrinkage.
+  assert.equal(
+    new TextEncoder().encode(msg).length,
+    new TextEncoder().encode(expected).length,
+  );
+});
+
+test('buildSiwsMessage embeds a newline in nonce literally (current behavior)', () => {
+  // The current implementation does NOT reject embedded newlines in nonce.
+  // This test pins that behavior so any future hardening that rejects/escapes
+  // newlines fails loudly and forces an intentional update. See report:
+  // design concern flagged.
+  const msg = buildSiwsMessage({
+    agentName: 'Bot',
+    agentAsset: null,
+    network: 'solana-devnet',
+    nonce: 'abc\ndef',
+    issuedAt: 'i',
+    expiresAt: 'e',
+  });
+  assert.equal(
+    msg,
+    'Sign in to Bot\n' +
+    '\n' +
+    'Agent: unregistered\n' +
+    'Network: solana-devnet\n' +
+    'Nonce: abc\ndef\n' +
+    'Issued: i\n' +
+    'Expires: e',
+  );
+});

@@ -48,3 +48,38 @@ test('NonceStore constructor rejects non-positive ttlMs', () => {
   assert.throws(() => new NonceStore({ ttlMs: 0 }), /ttlMs must be a positive finite number/);
   assert.throws(() => new NonceStore({ ttlMs: -1 }), /ttlMs must be a positive finite number/);
 });
+
+test('NonceStore constructor rejects NaN and Infinity ttlMs', () => {
+  assert.throws(() => new NonceStore({ ttlMs: NaN }), /ttlMs must be a positive finite number/);
+  assert.throws(
+    () => new NonceStore({ ttlMs: Infinity }),
+    /ttlMs must be a positive finite number/,
+  );
+});
+
+test('NonceStore.issue called concurrently produces 100 distinct nonces', async () => {
+  // issue() is synchronous, but wrapping each call in an async function still
+  // exercises the "concurrent" call shape — and more importantly asserts that
+  // the underlying randomness is wide enough for 100 calls to never collide.
+  // 16 bytes = 128 bits of entropy, so collision probability is negligible.
+  const store = new NonceStore({ ttlMs: 60_000 });
+  const issued = await Promise.all(
+    Array.from({ length: 100 }, () => Promise.resolve().then(() => store.issue().nonce)),
+  );
+  const distinct = new Set(issued);
+  assert.equal(distinct.size, 100);
+});
+
+test('NonceStore.size() counts expired-not-yet-swept entries', () => {
+  // size() is a raw map cardinality, not a live-only count. The contract is
+  // "tracked nonces (live + expired-but-not-swept)" — operators rely on this
+  // so memory pressure shows up in metrics even before the sweep runs.
+  const store = new NonceStore({ ttlMs: 100, now: () => 0 });
+  store.issue();
+  store.issue();
+  store.issue();
+  assert.equal(store.size(), 3);
+  store.setNow(() => 1000); // well past ttl
+  // Deliberately do NOT call sweep().
+  assert.equal(store.size(), 3);
+});
