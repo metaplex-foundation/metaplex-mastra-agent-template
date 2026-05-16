@@ -51,6 +51,9 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
     devDependencies:
+      nock:
+        specifier: ^14.0.15
+        version: 14.0.15
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
