@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import { resolve, dirname, relative } from 'node:path';
 
-const MIN_LINES_PCT = 65;
+const MIN_LINES_PCT = 85;
 
 function countExecutableLines(source: string): number {
   return source.split('\n').filter((line) => {
