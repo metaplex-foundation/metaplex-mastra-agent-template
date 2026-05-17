@@ -104,21 +104,21 @@ test('tx reject path: client tx_error → tool sees sanitized reason', async () 
   }
 });
 
-test('tx_result with unknown correlationId returns UNKNOWN_CORRELATION error', async () => {
+test('tx_result with unknown correlationId + well-formed signature is silently dropped (late-ok)', async () => {
+  // The server's tx_result handler (websocket.ts:858-873) treats an unknown
+  // correlationId with a WELL-FORMED signature as "late-ok": the user
+  // approved after the pending promise expired, the tx landed on-chain, so
+  // we don't surface a scary client-side error. This test pins that
+  // contract — no `error` event should arrive within a reasonable window.
   const env = await startTestServer();
   try {
     const client = await connectAuthenticated(env);
-    // Send tx_result before any tx is pending — malformed signature so the
-    // server falls into the UNKNOWN_CORRELATION branch (vs. the late-ok path
-    // which silently drops well-formed sigs).
-    client.send({ type: 'tx_result', correlationId: 'nope-not-real', signature: 'short' });
-    const err = await client.waitFor('error');
-    // The server validates signature shape BEFORE looking up correlationId,
-    // so a malformed signature short-circuits to INVALID_SIGNATURE.
-    assert.ok(
-      err.code === 'UNKNOWN_CORRELATION' || err.code === 'INVALID_SIGNATURE',
-      `expected UNKNOWN_CORRELATION or INVALID_SIGNATURE, got ${err.code}`,
-    );
+    client.send({ type: 'tx_result', correlationId: 'nope-not-real', signature: VALID_SIGNATURE });
+    // Wait briefly and assert nothing was received. (We can't `waitFor` here
+    // because the contract is silence — there's no event to wait for.)
+    await new Promise((r) => setTimeout(r, 100));
+    const errs = client.received.filter((m) => m.type === 'error');
+    assert.equal(errs.length, 0, `expected silent drop, got: ${JSON.stringify(errs)}`);
     await client.close();
   } finally {
     await env.close();

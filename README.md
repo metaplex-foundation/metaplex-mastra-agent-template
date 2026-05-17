@@ -13,10 +13,12 @@ Browse registered agents at [metaplex.com/agents](https://metaplex.com/agents). 
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** ≥ 22 (the coverage script uses `fs.promises.glob`, which landed in Node 22; the test reporter pairing for `lcov` also stabilized in 22)
 - **pnpm** ≥ 9
 - An API key for an LLM provider (Anthropic / OpenAI / Google)
 - A Solana wallet you can sign with (Phantom, Solflare, or any wallet adapter that supports `signMessage`)
+
+> **Node 20 users:** the runtime targets >= 20, but the dev tooling (specifically `scripts/check-coverage.ts`) needs >= 22. If you must stay on 20, either run that script under a separate Node 22 install or swap `fs.promises.glob` for the [`glob`](https://www.npmjs.com/package/glob) npm package.
 
 ### 1. Clone & install
 
@@ -135,7 +137,7 @@ pnpm test:coverage     # emits packages/*/coverage/lcov.info
 
 Each package follows the same layout:
 
-```
+```text
 packages/<pkg>/test/
   helpers/        # shared mocks (mock-rpc, stub agents, env isolation)
   unit/           # pure functions, deterministic

@@ -76,7 +76,9 @@ test('sleep returns TIMEOUT immediately when signal is already aborted', async (
   assert.equal(result.status, 'error');
   assert.equal(result.code, 'TIMEOUT');
   assert.match(result.message, /before it started/);
-  // Pre-abort short-circuit: no timer is set, the call returns synchronously
-  // (microtask only).
-  assert.ok(elapsed < 50, `expected immediate return, got ${elapsed}ms`);
+  // Pre-abort short-circuit: no timer is set, the call returns essentially
+  // synchronously (microtask only). 200ms ceiling tolerates slower CI runners
+  // while still verifying the short-circuit (the alternative — running the
+  // full 30-second timer — would be 150x slower).
+  assert.ok(elapsed < 200, `expected immediate return, got ${elapsed}ms`);
 });

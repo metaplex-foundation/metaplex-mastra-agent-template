@@ -274,6 +274,23 @@ export async function openClient(env: TestServerEnv): Promise<AuthenticatedClien
     }
   });
 
+  // If the socket closes or errors out, any pending waiters would otherwise
+  // hang until their per-call timeout. Reject them immediately so the failure
+  // surfaces fast and includes the queue contents for debugging.
+  const failWaiters = (event: string, detail: string) => {
+    if (waiters.length === 0) return;
+    const queued = received.map((m) => m.type).join(',');
+    const pending = waiters.splice(0, waiters.length);
+    const message = `socket ${event} (${detail}) before waitFor settled; received: [${queued}]`;
+    for (const w of pending) w.reject(new Error(message));
+  };
+  socket.on('close', (code: number, reason: Buffer) => {
+    failWaiters('close', `code=${code} reason=${reason.toString() || '<empty>'}`);
+  });
+  socket.on('error', (err: Error) => {
+    failWaiters('error', err.message);
+  });
+
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);

@@ -29,7 +29,11 @@ test('multiple concurrent clients each receive distinct sessionIds', async () =>
 });
 
 test('client disconnect during pending tx cleans up the session', async () => {
-  const env = await startTestServer();
+  // Constrain to a single connection: the test reconnects after disconnect
+  // and asserts the reconnect succeeds. With MAX_CONNECTIONS=1 the reconnect
+  // can only succeed if the server actually removed the old session — gives
+  // us a deterministic cleanup proof without needing to introspect internals.
+  const env = await startTestServer({ extraEnv: { MAX_CONNECTIONS: '1' } });
   try {
     const client = await connectAuthenticated(env);
     // Script a tool that opens a pending tx but never gets a response.

@@ -326,6 +326,23 @@ export class PlexChatServer {
     await new Promise<void>((resolve, reject) => {
       const onError = (err: Error) => {
         this.httpServer?.removeListener('listening', onListening);
+        // Listen() failed — tear down anything we already set up in this
+        // start() invocation so we don't leak intervals or a half-open
+        // HTTP server. No sessions exist yet at this point (connections
+        // can't arrive before 'listening'), so the sessions map is empty.
+        if (this.pingInterval) {
+          clearInterval(this.pingInterval);
+          this.pingInterval = null;
+        }
+        if (this.nonceSweepInterval) {
+          clearInterval(this.nonceSweepInterval);
+          this.nonceSweepInterval = null;
+        }
+        try {
+          this.httpServer?.close();
+        } catch {
+          // ignore — server may not have an active socket yet
+        }
         reject(err);
       };
       const onListening = () => {
@@ -339,44 +356,58 @@ export class PlexChatServer {
 
     const boundPort = this.getPort() ?? port;
     void (async () => {
-      console.log(`PlexChat WebSocket server running on ws://localhost:${boundPort}`);
-      console.log(`Agent mode: ${config.AGENT_MODE}`);
-      console.log(`Agent name: ${config.ASSISTANT_NAME}`);
-      console.log(`RPC: ${config.SOLANA_RPC_URL}`);
-      // The chat template's `next dev` hardcodes :3001. If the operator
-      // overrides that port locally, this URL won't match — but neither
-      // would the previous bare `http://localhost:3001`, so we're not
-      // making it worse.
-      const testUiUrl = buildTestUiUrl({
-        uiOrigin: 'http://localhost:3001',
-        wsPort: boundPort,
-        rpcUrl: config.SOLANA_RPC_URL,
-        name: config.ASSISTANT_NAME,
-      });
-      console.log(`Test UI (if running): ${testUiUrl}`);
+      try {
+        console.log(`PlexChat WebSocket server running on ws://localhost:${boundPort}`);
+        console.log(`Agent mode: ${config.AGENT_MODE}`);
+        console.log(`Agent name: ${config.ASSISTANT_NAME}`);
+        console.log(`RPC: ${config.SOLANA_RPC_URL}`);
+        // The chat template's `next dev` hardcodes :3001. If the operator
+        // overrides that port locally, this URL won't match — but neither
+        // would the previous bare `http://localhost:3001`, so we're not
+        // making it worse.
+        const testUiUrl = buildTestUiUrl({
+          uiOrigin: 'http://localhost:3001',
+          wsPort: boundPort,
+          rpcUrl: config.SOLANA_RPC_URL,
+          name: config.ASSISTANT_NAME,
+        });
+        console.log(`Test UI (if running): ${testUiUrl}`);
 
-      // Resolve owner at startup
-      this.ownerWallet = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
-      // Push the resolved owner into the per-wallet rate limiter so the
-      // owner is unconditionally allowed. If resolution failed (null), the
-      // limiter remains in the no-exemption state — fail-closed is correct.
-      this.walletLimiter.setOwnerExempt(this.ownerWallet);
-      if (this.ownerWallet) {
-        console.log(`Agent owner: ${this.ownerWallet}`);
-      } else if (config.AGENT_MODE === 'autonomous') {
-        // Config validation prevents reaching here without BOOTSTRAP_WALLET, so
-        // a null owner means the on-chain fetch failed (transient RPC).
-        console.warn(
-          'WARNING: Owner could not be resolved from the on-chain asset. ' +
-          'Authorization will fail until resolution succeeds.',
+        // Resolve owner at startup
+        this.ownerWallet = await resolveOwner(config.AGENT_ASSET_ADDRESS ?? null);
+        // Push the resolved owner into the per-wallet rate limiter so the
+        // owner is unconditionally allowed. If resolution failed (null), the
+        // limiter remains in the no-exemption state — fail-closed is correct.
+        this.walletLimiter.setOwnerExempt(this.ownerWallet);
+        if (this.ownerWallet) {
+          console.log(`Agent owner: ${this.ownerWallet}`);
+        } else if (config.AGENT_MODE === 'autonomous') {
+          // Config validation prevents reaching here without BOOTSTRAP_WALLET,
+          // so a null owner means the on-chain fetch failed (transient RPC).
+          console.warn(
+            'WARNING: Owner could not be resolved from the on-chain asset. ' +
+            'Authorization will fail until resolution succeeds.',
+          );
+        } else if (config.AGENT_MODE === 'public' && !config.AGENT_ASSET_ADDRESS) {
+          console.log(
+            'Hint: set BOOTSTRAP_WALLET in .env (or register the agent) to enable owner-gated tools',
+          );
+        }
+      } catch (err) {
+        // resolveOwner can throw if RPC fails in an unexpected way (the
+        // function itself swallows most errors and returns null, but
+        // defense-in-depth: don't let a startup hiccup leave whenReady()
+        // hanging forever).
+        console.error(
+          'Owner resolution failed during startup:',
+          err instanceof Error ? err.message : String(err),
         );
-      } else if (config.AGENT_MODE === 'public' && !config.AGENT_ASSET_ADDRESS) {
-        console.log(
-          'Hint: set BOOTSTRAP_WALLET in .env (or register the agent) to enable owner-gated tools',
-        );
+      } finally {
+        // ALWAYS resolve readiness, even on error. whenReady() callers
+        // (the worker loop bootstrap, test harness) check getOwnerWallet()
+        // afterward to decide whether they have an authoritative owner.
+        this.resolveReady();
       }
-
-      this.resolveReady();
     })();
   }
 

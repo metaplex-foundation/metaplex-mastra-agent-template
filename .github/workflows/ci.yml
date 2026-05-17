@@ -44,12 +44,15 @@ jobs:
         run: pnpm build
 
       - name: Test
+        timeout-minutes: 10
         run: pnpm test
 
       - name: Coverage
+        timeout-minutes: 10
         run: pnpm test:coverage
 
       - name: Enforce coverage threshold
+        timeout-minutes: 2
         run: tsx scripts/check-coverage.ts
 
       - name: Upload coverage

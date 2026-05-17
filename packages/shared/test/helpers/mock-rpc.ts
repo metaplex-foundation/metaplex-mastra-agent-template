@@ -18,8 +18,21 @@ export async function startMockRpc(): Promise<MockRpc> {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', () => {
-      const { id, method, params } = JSON.parse(body);
-      calls.push({ method, params });
+      let id: unknown = null;
+      let method: string;
+      let params: unknown[] | undefined;
+      try {
+        ({ id, method, params } = JSON.parse(body));
+      } catch (e) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32700, message: `parse error: ${(e as Error).message}` },
+        }));
+        return;
+      }
+      calls.push({ method, params: params ?? [] });
       const handler = handlers.get(method);
       if (!handler) {
         res.writeHead(200, { 'content-type': 'application/json' });

@@ -54,10 +54,13 @@ export function stubUmiRpc(umi: Umi): UmiRpcCalls {
   // 64-byte signature filled with 1s — base58-encodes to a fixed string.
   const fakeSig = new Uint8Array(64).fill(1);
 
-  (umi.rpc as any).getLatestBlockhash = async () => ({
-    blockhash: fixture.blockhash,
-    lastValidBlockHeight: fixture.lastValidBlockHeight,
-  });
+  (umi.rpc as any).getLatestBlockhash = async () => {
+    calls.getLatestBlockhash += 1;
+    return {
+      blockhash: fixture.blockhash,
+      lastValidBlockHeight: fixture.lastValidBlockHeight,
+    };
+  };
 
   (umi.rpc as any).sendTransaction = async () => {
     calls.sendTransaction += 1;
@@ -67,14 +70,6 @@ export function stubUmiRpc(umi: Umi): UmiRpcCalls {
   (umi.rpc as any).confirmTransaction = async () => {
     calls.confirmTransaction += 1;
     return { context: { slot: 1 }, value: { err: null } };
-  };
-
-  // Wrap getLatestBlockhash to count calls. (Re-assigning after the first
-  // override so the counter wraps the same async function.)
-  const realGetLatestBlockhash = (umi.rpc as any).getLatestBlockhash;
-  (umi.rpc as any).getLatestBlockhash = async (...args: any[]) => {
-    calls.getLatestBlockhash += 1;
-    return realGetLatestBlockhash(...args);
   };
 
   return calls;

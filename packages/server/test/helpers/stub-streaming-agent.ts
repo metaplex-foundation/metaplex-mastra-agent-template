@@ -89,10 +89,13 @@ export function makeStreamingStubAgent(): StreamingStubAgent {
           // Emit one initial step-start to satisfy the consumer's step counter.
           controller.enqueue({ type: 'step-start', payload: { stepType: 'initial' } });
           for (const entry of currentScript) {
-            // Honor abort signal between steps so abort tests behave.
+            // Honor abort signal between steps so abort tests behave. Resolve
+            // text with whatever's been accumulated so far rather than '' so
+            // partial streams (text emitted, then aborted) are visible to
+            // tests that inspect the result text.
             if (opts?.abortSignal?.aborted) {
               controller.close();
-              resolveText('');
+              resolveText(aggregatedText);
               resolveUsage({ inputTokens, outputTokens });
               resolveFinishReason('aborted');
               return;

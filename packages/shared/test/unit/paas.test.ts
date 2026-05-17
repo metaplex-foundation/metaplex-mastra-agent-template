@@ -1,4 +1,4 @@
-import { test, afterEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { detectPaas } from '../../src/paas.js';
 
@@ -16,6 +16,13 @@ const PAAS_KEYS = [
   'KUBERNETES_SERVICE_HOST',
   'K_SERVICE',
 ];
+
+beforeEach(() => {
+  // Guarantee a clean PaaS environment per test — the host may have one of
+  // these set (e.g., running locally inside a Railway shell), which would
+  // otherwise pollute the "no PaaS env vars" baseline test.
+  for (const k of PAAS_KEYS) delete process.env[k];
+});
 
 afterEach(() => {
   // Don't blow away the whole env — only PaaS-related keys, so the test

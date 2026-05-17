@@ -1,5 +1,13 @@
 export const ZERO_KEYPAIR = '[' + Array.from({ length: 64 }, () => 0).join(',') + ']';
 
+/**
+ * NOT REENTRANT. `isolateEnv` writes to a single module-scoped `SAVED_ENV`
+ * snapshot; calling it twice without an intervening `restoreEnv` overwrites
+ * the original snapshot and the first env is lost forever. Tests MUST pair
+ * each `isolateEnv` with a `restoreEnv` (typically in `afterEach`) — do not
+ * nest or run concurrently. If reentrant snapshots are ever needed, switch
+ * this to a stack of saved envs.
+ */
 const SAVED_ENV: Record<string, string | undefined> = {};
 
 export function isolateEnv(overrides: Record<string, string> = {}): void {
