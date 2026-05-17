@@ -82,8 +82,6 @@ export interface StartTestServerOptions {
   extraEnv?: Record<string, string>;
   /** Enable debug events on the server. Default `false` (off) so tests aren't drowning in chunks. */
   enableDebugEvents?: boolean;
-  /** Override the per-connection per-session rate limiter window/max. */
-  rateLimitMax?: number;
 }
 
 /**
@@ -254,6 +252,7 @@ export async function openClient(env: TestServerEnv): Promise<AuthenticatedClien
     type: string;
     resolve: (msg: ServerMessage) => void;
     reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout> | null;
   }> = [];
 
   socket.on('message', (data) => {
@@ -276,13 +275,18 @@ export async function openClient(env: TestServerEnv): Promise<AuthenticatedClien
 
   // If the socket closes or errors out, any pending waiters would otherwise
   // hang until their per-call timeout. Reject them immediately so the failure
-  // surfaces fast and includes the queue contents for debugging.
+  // surfaces fast and includes the queue contents for debugging. We also
+  // clear each waiter's pending timer so it can't fire later with a less-
+  // informative timeout error after the close has already been reported.
   const failWaiters = (event: string, detail: string) => {
     if (waiters.length === 0) return;
     const queued = received.map((m) => m.type).join(',');
     const pending = waiters.splice(0, waiters.length);
     const message = `socket ${event} (${detail}) before waitFor settled; received: [${queued}]`;
-    for (const w of pending) w.reject(new Error(message));
+    for (const w of pending) {
+      if (w.timer) clearTimeout(w.timer);
+      w.reject(new Error(message));
+    }
   };
   socket.on('close', (code: number, reason: Buffer) => {
     failWaiters('close', `code=${code} reason=${reason.toString() || '<empty>'}`);
@@ -318,7 +322,7 @@ export async function openClient(env: TestServerEnv): Promise<AuthenticatedClien
         if (idx >= 0) received.splice(idx, 1);
         resolve(msg as Extract<ServerMessage, { type: T }>);
       };
-      waiters.push({ type, resolve: resolveTyped, reject });
+      waiters.push({ type, resolve: resolveTyped, reject, timer: t });
     });
   }
 

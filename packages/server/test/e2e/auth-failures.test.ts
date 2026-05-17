@@ -21,11 +21,20 @@ import {
 } from '../helpers/e2e-server.js';
 import { buildSiwsMessage } from '@metaplex-foundation/shared';
 
-async function awaitClose(socket: WebSocket): Promise<{ code: number; reason: string }> {
-  return new Promise((resolve) => {
-    socket.once('close', (code: number, reason: Buffer) => {
+async function awaitClose(
+  socket: WebSocket,
+  timeoutMs = 5000,
+): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve, reject) => {
+    const onClose = (code: number, reason: Buffer) => {
+      clearTimeout(timer);
       resolve({ code, reason: reason.toString() });
-    });
+    };
+    const timer = setTimeout(() => {
+      socket.removeListener('close', onClose);
+      reject(new Error(`awaitClose timed out after ${timeoutMs}ms (readyState=${socket.readyState})`));
+    }, timeoutMs);
+    socket.once('close', onClose);
   });
 }
 
@@ -189,8 +198,10 @@ test('pre-auth handshake timeout closes with auth_timeout + 4001', async () => {
     await client.waitFor('auth_challenge');
     // Do NOT send auth_response. Wait for the server to time out. Pre-arm
     // the close watcher so we don't miss the close that fires immediately
-    // after auth_error.
-    const closedPromise = awaitClose(client.socket);
+    // after auth_error. The server's handshake timeout itself is 5000ms,
+    // so awaitClose needs more headroom than its own default — otherwise
+    // the helper races the server's timer.
+    const closedPromise = awaitClose(client.socket, 10_000);
     const err = await client.waitFor('auth_error', 10_000);
     assert.equal(err.code, 'auth_timeout');
     const closed = await closedPromise;

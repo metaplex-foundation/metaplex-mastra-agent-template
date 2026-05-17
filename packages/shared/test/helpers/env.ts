@@ -3,14 +3,18 @@ export const ZERO_KEYPAIR = '[' + Array.from({ length: 64 }, () => 0).join(',') 
 /**
  * NOT REENTRANT. `isolateEnv` writes to a single module-scoped `SAVED_ENV`
  * snapshot; calling it twice without an intervening `restoreEnv` overwrites
- * the original snapshot and the first env is lost forever. Tests MUST pair
- * each `isolateEnv` with a `restoreEnv` (typically in `afterEach`) — do not
- * nest or run concurrently. If reentrant snapshots are ever needed, switch
- * this to a stack of saved envs.
+ * the snapshot. Tests MUST pair each `isolateEnv` with a `restoreEnv`
+ * (typically in `afterEach`) — do not nest or run concurrently. If reentrant
+ * snapshots are ever needed, switch this to a stack of saved envs.
  */
 const SAVED_ENV: Record<string, string | undefined> = {};
 
 export function isolateEnv(overrides: Record<string, string> = {}): void {
+  // Reset the snapshot before saving so stale keys from a prior isolate/
+  // restore cycle don't bleed into this one — without this, a key that
+  // existed during the first call but not the second would be re-introduced
+  // by restoreEnv() with its first-call value.
+  for (const k of Object.keys(SAVED_ENV)) delete SAVED_ENV[k];
   for (const k of Object.keys(process.env)) SAVED_ENV[k] = process.env[k];
   for (const k of Object.keys(process.env)) delete process.env[k];
   Object.assign(process.env, overrides);

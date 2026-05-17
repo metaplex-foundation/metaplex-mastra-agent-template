@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 
-type RpcHandler = (params: unknown[]) => unknown;
+type RpcHandler = (params: unknown[]) => unknown | Promise<unknown>;
 
 export interface MockRpc {
   url: string;
@@ -17,7 +17,7 @@ export async function startMockRpc(): Promise<MockRpc> {
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       let id: unknown = null;
       let method: string;
       let params: unknown[] | undefined;
@@ -40,7 +40,10 @@ export async function startMockRpc(): Promise<MockRpc> {
         return;
       }
       try {
-        const result = handler(params ?? []);
+        // Await so async handlers (returning Promises) work the same way as
+        // sync handlers; thrown errors and rejected promises both fall into
+        // the catch below.
+        const result = await handler(params ?? []);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ jsonrpc: '2.0', id, result }));
       } catch (e) {
