@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { isAuthorized } from '../src/allowlist.js';
+import { isAuthorized } from '../../src/allowlist.js';
 
 const O = 'OwnerPubkey11111111111111111111111111111111';
 const A = 'AllowedPubkey1111111111111111111111111111111';

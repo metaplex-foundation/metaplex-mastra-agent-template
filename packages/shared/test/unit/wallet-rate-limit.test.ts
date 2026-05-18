@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { WalletRateLimiter } from '../src/wallet-rate-limit.js';
+import { WalletRateLimiter } from '../../src/wallet-rate-limit.js';
 
 test('WalletRateLimiter allows up to max events in window', () => {
   let now = 0;
@@ -92,4 +92,49 @@ test('WalletRateLimiter setOwnerExempt updates exemption at runtime', () => {
   // remain — already at max).
   rl.setOwnerExempt(null);
   assert.equal(rl.allow('OWNER'), false);
+});
+
+test('WalletRateLimiter owner-exempt calls never grow tracked size', () => {
+  // Sanity: 100 exempt calls must not allocate any tracked entry. This is the
+  // memory-safety guarantee — if exempt traffic counted toward maxKeys, an
+  // owner hammering the WS would evict legitimate user entries.
+  let now = 0;
+  const rl = new WalletRateLimiter({
+    max: 1,
+    windowMs: 1000,
+    maxKeys: 100,
+    now: () => now,
+    ownerExempt: 'OWNER',
+  });
+  for (let i = 0; i < 100; i++) {
+    assert.equal(rl.allow('OWNER'), true);
+  }
+  assert.equal(rl.size(), 0);
+});
+
+test('WalletRateLimiter setOwnerExempt(null) restores normal budget for previously-exempt key', () => {
+  // The existing "setOwnerExempt updates exemption at runtime" test starts
+  // with no exemption, sets one, then clears — but at that point the key is
+  // already at-cap from the pre-exemption phase, so the post-clear `false`
+  // is also explainable by stale timestamps. Here we exercise the cleaner
+  // path: a fresh key that was exempt from the start, then has exemption
+  // revoked. After revocation it must accrue timestamps normally, and only
+  // *new* calls (past the cap) should reject.
+  let now = 0;
+  const rl = new WalletRateLimiter({
+    max: 2,
+    windowMs: 1000,
+    maxKeys: 100,
+    now: () => now,
+    ownerExempt: 'X',
+  });
+  // Exempt phase — 5 calls succeed, none tracked.
+  for (let i = 0; i < 5; i++) assert.equal(rl.allow('X'), true);
+  assert.equal(rl.size(), 0);
+  // Revoke exemption — X now counts toward max=2 from a fresh budget.
+  rl.setOwnerExempt(null);
+  assert.equal(rl.allow('X'), true); // 1st
+  assert.equal(rl.allow('X'), true); // 2nd
+  assert.equal(rl.allow('X'), false); // 3rd — over budget
+  assert.equal(rl.size(), 1);
 });

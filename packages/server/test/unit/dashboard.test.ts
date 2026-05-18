@@ -27,7 +27,7 @@ after(() => {
 // Lazy import — these modules read process.env at load time, so the
 // before() hook must run first. Top-level `import` would race that.
 async function loadDashboard() {
-  return await import('../src/dashboard.js');
+  return await import('../../src/dashboard.js');
 }
 
 function makeReq(opts: {

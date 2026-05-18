@@ -399,6 +399,18 @@ export function getConfig(): EnvConfig {
 }
 
 /**
+ * Test-only: clear the memoized config so the next `getConfig()` call
+ * re-reads `process.env`. The production path never needs this — env is
+ * fixed for the process lifetime — but tests rewrite env between cases
+ * and need a way to bust the singleton without juggling ESM URL busters
+ * across the whole import graph. The leading underscore marks it as
+ * internal; do not call from production code.
+ */
+export function _resetConfigForTests(): void {
+  _config = null;
+}
+
+/**
  * Update the in-memory config cache after state changes.
  * Call this after setState() when the config needs to reflect new values
  * within the same process (e.g. after registration saves a new asset address).

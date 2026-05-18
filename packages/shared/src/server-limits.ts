@@ -42,3 +42,13 @@ export function getServerLimits(): ServerLimits {
   }
   return _limits;
 }
+
+/**
+ * Test-only: clear the memoized server-limits cache so the next
+ * `getServerLimits()` call re-reads `process.env`. Mirrors
+ * `_resetConfigForTests` in `config.ts`. Do not call from production
+ * code — limits are fixed for the process lifetime.
+ */
+export function _resetLimitsForTests(): void {
+  _limits = null;
+}

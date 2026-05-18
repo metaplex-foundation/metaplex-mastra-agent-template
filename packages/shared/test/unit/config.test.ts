@@ -51,7 +51,7 @@ async function load(env: Record<string, string>) {
   Object.assign(process.env, env);
   // Each call gets a unique URL so ESM treats it as a new module instance.
   const bust = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  return await import(`../src/config.js?bust=${bust}`);
+  return await import(`../../src/config.js?bust=${bust}`);
 }
 
 const ZERO_KEYPAIR = '[' + Array.from({ length: 64 }, () => 0).join(',') + ']';

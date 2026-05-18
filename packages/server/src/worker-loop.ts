@@ -59,6 +59,16 @@ export class WorkerLoop {
     await this.exited;
   }
 
+  /**
+   * Test-only escape hatch: invoke a single tick body without starting the
+   * loop. Mirrors the `_resetConfigForTests` / `_resetLimitsForTests` pattern
+   * used in shared/. Production code never calls this — the leading
+   * underscore marks it as internal.
+   */
+  async _runTickForTests(): Promise<void> {
+    return this.runTick();
+  }
+
   private async loop(): Promise<void> {
     const config = getConfig();
     while (this.running) {

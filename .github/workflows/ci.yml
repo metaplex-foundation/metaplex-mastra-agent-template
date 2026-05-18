@@ -42,3 +42,22 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Test
+        timeout-minutes: 10
+        run: pnpm test
+
+      - name: Coverage
+        timeout-minutes: 10
+        run: pnpm test:coverage
+
+      - name: Enforce coverage threshold
+        timeout-minutes: 2
+        run: pnpm exec tsx scripts/check-coverage.ts
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: packages/*/coverage/lcov.info
+          if-no-files-found: error

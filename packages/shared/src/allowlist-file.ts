@@ -172,6 +172,13 @@ export class AllowlistFile {
    * Atomic write — tmp file + rename, mode 0600. Mirrors agent-state.json's
    * pattern. We don't preserve any extra keys in the JSON (e.g. operator
    * comments) — the file shape is `{ "wallets": string[] }` and that's it.
+   *
+   * INVARIANT: invalidate `this.snapshot` after writing so the next
+   * `reload()` MUST re-read the file from disk. Without this, an
+   * add/remove → reload pair within a single filesystem mtime tick (common
+   * on Linux ext4 in CI runners) sees a matching mtime and short-circuits
+   * the re-read, leaving `current()` stale. The mtime-skip optimization is
+   * for external pollers, not for self-induced writes.
    */
   private writeFile(wallets: string[]): void {
     const dir = dirname(this.opts.path);
@@ -185,5 +192,7 @@ export class AllowlistFile {
     const payload = JSON.stringify({ wallets }, null, 2) + '\n';
     writeFileSync(tmpPath, payload, { mode: 0o600 });
     renameSync(tmpPath, this.opts.path);
+    // Force the next reload to re-read regardless of mtime resolution.
+    this.snapshot = null;
   }
 }

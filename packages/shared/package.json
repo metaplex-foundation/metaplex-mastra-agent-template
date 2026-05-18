@@ -9,13 +9,16 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --import tsx"
+    "test": "node --test --import tsx --test-reporter spec 'test/**/*.test.ts'",
+    "test:unit": "node --test --import tsx --test-reporter spec 'test/unit/**/*.test.ts'",
+    "test:integration": "node --test --import tsx --test-reporter spec 'test/integration/**/*.test.ts'",
+    "test:coverage": "mkdir -p coverage && node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@metaplex-foundation/plexchat": "0.1.0",
     "@metaplex-foundation/genesis": "^0.35.0",
     "@metaplex-foundation/mpl-core": "^1.9.1",
     "@metaplex-foundation/mpl-toolbox": "^0.10.0",
+    "@metaplex-foundation/plexchat": "0.1.0",
     "@metaplex-foundation/umi": "^1.1.0",
     "@metaplex-foundation/umi-bundle-defaults": "^1.1.0",
     "@noble/hashes": "1.7.1",
@@ -24,5 +27,8 @@
     "tweetnacl": "^1.0.3",
     "yaml": "^2.6.0",
     "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "nock": "^14.0.15"
   }
 }

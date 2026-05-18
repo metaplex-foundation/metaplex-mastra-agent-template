@@ -13,10 +13,12 @@ Browse registered agents at [metaplex.com/agents](https://metaplex.com/agents). 
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** ≥ 22 (the coverage script uses `fs.promises.glob`, which landed in Node 22; the test reporter pairing for `lcov` also stabilized in 22)
 - **pnpm** ≥ 9
 - An API key for an LLM provider (Anthropic / OpenAI / Google)
 - A Solana wallet you can sign with (Phantom, Solflare, or any wallet adapter that supports `signMessage`)
+
+> **Node 20 users:** the runtime targets >= 20, but the dev tooling (specifically `scripts/check-coverage.ts`) needs >= 22. If you must stay on 20, either run that script under a separate Node 22 install or swap `fs.promises.glob` for the [`glob`](https://www.npmjs.com/package/glob) npm package.
 
 ### 1. Clone & install
 
@@ -118,6 +120,44 @@ Pick `public` if unsure — switching is one env var. The full architectural det
 | `pnpm build` | Build all packages |
 | `pnpm typecheck` | Type-check all packages |
 | `pnpm bootstrap [public\|autonomous]` | Fork-time pruner — deletes the other mode's code paths |
+
+---
+
+## Testing
+
+The repo ships a layered test suite built on `node --test` (no Jest, no Vitest). All three packages have unit and integration tests; the server package adds WebSocket E2E tests. The current suite is 404 tests / 88.98% line coverage; CI gates merges at 85%.
+
+```bash
+pnpm test              # all layers, all packages (builds dependents first)
+pnpm test:unit         # pure-function tests, no I/O
+pnpm test:integration  # tool execute() paths and agent assembly with mocked RPC/HTTP
+pnpm test:e2e          # real WebSocket server + real ws client + mocked Solana + stubbed model
+pnpm test:coverage     # emits packages/*/coverage/lcov.info
+```
+
+Each package follows the same layout:
+
+```text
+packages/<pkg>/test/
+  helpers/        # shared mocks (mock-rpc, stub agents, env isolation)
+  unit/           # pure functions, deterministic
+  integration/    # tool execute() with mocked RPC/HTTP
+  e2e/            # server package only — full PlexChat conversations
+```
+
+To run a single test file:
+
+```bash
+pnpm --filter @metaplex-foundation/shared exec node --test --import tsx test/unit/state.test.ts
+```
+
+To enforce coverage locally (same gate CI runs):
+
+```bash
+pnpm test:coverage && tsx scripts/check-coverage.ts
+```
+
+Conventions, helper inventory, and recipes for adding new tool tests or E2E scenarios live in [`docs/testing.md`](./docs/testing.md).
 
 ---
 
