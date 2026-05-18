@@ -15,7 +15,7 @@
     "test:coverage": "mkdir -p coverage && node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@metaplex-foundation/agent-tools": "link:../../../metaplex-agent-toolkit/packages/tools",
+    "@metaplex-foundation/agent-tools": "link:../../../metaplex-agent-tools",
     "@metaplex-foundation/mpl-core": "^1.9.1",
     "@metaplex-foundation/mpl-toolbox": "^0.10.0",
     "@metaplex-foundation/plexchat": "0.1.0",
