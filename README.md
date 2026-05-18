@@ -86,6 +86,8 @@ Click the **Deploy on Railway** button at the top. Railway prompts for the five 
 
 ## What you can build
 
+The tools (balances, prices, swaps, registration, treasury, autonomous goals/tasks, transfers) live in the sibling [`metaplex-agent-toolkit`](../metaplex-agent-toolkit) repo as the `@metaplex-foundation/agent-tools` package. This template wires up the `publicBundle` / `autonomousBundle` by default; cherry-pick with `createToolset({ include, exclude, capabilities })` if you only need a subset. See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md#adding-new-tools).
+
 Two operating modes, picked via `AGENT_MODE`:
 
 | Mode | Who signs txs | Use case |
