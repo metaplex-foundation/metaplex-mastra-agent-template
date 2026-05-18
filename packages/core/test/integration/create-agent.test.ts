@@ -9,9 +9,9 @@ import {
 import { _resetConfigForTests } from '@metaplex-foundation/shared';
 import { createAgent } from '../../src/create-agent.js';
 import {
-  publicAgentTools,
-  autonomousAgentTools,
-} from '../../src/tools/index.js';
+  publicBundle as publicAgentTools,
+  autonomousBundle as autonomousAgentTools,
+} from '@metaplex-foundation/agent-tools';
 
 /**
  * Integration tests for `createAgent()` mode dispatch.

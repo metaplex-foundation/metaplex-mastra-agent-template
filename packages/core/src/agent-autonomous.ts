@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-foundation/shared';
-import { autonomousAgentTools } from './tools/index.js';
+import { getConfig } from '@metaplex-foundation/agent-runtime';
+import { autonomousBundle } from '@metaplex-foundation/agent-tools';
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';
 
@@ -23,6 +23,6 @@ export function createAutonomousAgent() {
     name: config.ASSISTANT_NAME,
     instructions: buildSystemPrompt('autonomous', normalizedPersona),
     model: config.LLM_MODEL,
-    tools: autonomousAgentTools,
+    tools: autonomousBundle,
   });
 }
