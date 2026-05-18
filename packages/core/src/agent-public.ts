@@ -1,5 +1,5 @@
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-foundation/agent-runtime';
+import { getConfig } from '@metaplex-foundation/shared';
 import { publicBundle } from '@metaplex-foundation/agent-tools';
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';

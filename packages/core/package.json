@@ -20,7 +20,6 @@
   },
   "dependencies": {
     "@mastra/core": "^1.24.0",
-    "@metaplex-foundation/agent-runtime": "link:../../../metaplex-agent-toolkit/packages/runtime",
     "@metaplex-foundation/agent-tools": "link:../../../metaplex-agent-toolkit/packages/tools",
     "@metaplex-foundation/genesis": "^0.35.0",
     "@metaplex-foundation/mpl-agent-registry": "^0.2.5",

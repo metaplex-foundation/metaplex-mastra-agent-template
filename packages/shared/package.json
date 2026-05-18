@@ -15,13 +15,17 @@
     "test:coverage": "mkdir -p coverage && node --test --import tsx --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-exclude='src/**/*.d.ts' --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "@metaplex-foundation/agent-runtime": "link:../../../metaplex-agent-toolkit/packages/runtime",
+    "@metaplex-foundation/agent-tools": "link:../../../metaplex-agent-toolkit/packages/tools",
     "@metaplex-foundation/mpl-core": "^1.9.1",
+    "@metaplex-foundation/mpl-toolbox": "^0.10.0",
     "@metaplex-foundation/plexchat": "0.1.0",
     "@metaplex-foundation/umi": "^1.1.0",
+    "@metaplex-foundation/umi-bundle-defaults": "^1.1.0",
     "@noble/hashes": "1.7.1",
     "bs58": "^6.0.0",
+    "dotenv": "^16.4.0",
     "tweetnacl": "^1.0.3",
+    "yaml": "^2.6.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
