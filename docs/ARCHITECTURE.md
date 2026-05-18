@@ -280,7 +280,7 @@ The chat UI is a separate repo: [metaplex-agent-chat-template](https://github.co
 
 ## Adding New Tools
 
-Tools ship in the [`@metaplex-foundation/agent-tools`](../../metaplex-agent-tools) package (sibling repo `metaplex-agent-tools`). The template imports two named bundles — `publicBundle` and `autonomousBundle` — and passes them straight to `new Agent({ tools })`. To select a different subset, build your own:
+Tools ship as the [`@metaplex-foundation/agent-tools`](https://www.npmjs.com/package/@metaplex-foundation/agent-tools) npm package. The template imports two named bundles — `publicBundle` and `autonomousBundle` — and passes them straight to `new Agent({ tools })`. To select a different subset, build your own:
 
 ```ts
 import { createToolset } from '@metaplex-foundation/agent-tools';
