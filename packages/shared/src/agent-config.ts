@@ -47,8 +47,8 @@ const LIMITS_SCHEMA = z
  */
 const TOOLS_SCHEMA = z
   .object({
-    include: z.array(z.string().min(1)).optional(),
-    exclude: z.array(z.string().min(1)).optional(),
+    include: z.array(z.string().trim().min(1)).optional(),
+    exclude: z.array(z.string().trim().min(1)).optional(),
   })
   .strict();
 
