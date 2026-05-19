@@ -1,5 +1,6 @@
 import {
   appendJournal,
+  buildToolHostContext,
   createUmi,
   getAgentPda,
   getConfig,
@@ -124,19 +125,15 @@ export class WorkerLoop {
     //     the connectedWallet for owner gating (see shared/auth.ts), so we
     //     set it to the resolved ownerWallet — the worker tick stands in
     //     as the owner doing scheduled work. ---
-    type ExtendedContext = AgentContext & { abortSignal: AbortSignal };
-    const requestContext = new RequestContext<ExtendedContext>([
-      ['walletAddress', this.ownerWallet],
-      ['transactionSender', null],
-      ['agentMode', 'autonomous'],
-      ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
-      ['agentTokenMint', config.AGENT_TOKEN_MINT ?? null],
-      ['agentFeeSol', config.AGENT_FEE_SOL],
-      ['tokenOverride', config.TOKEN_OVERRIDE ?? null],
-      ['ownerWallet', this.ownerWallet],
-      ['txCounter', txCounter],
-      ['abortSignal', tickAbort.signal],
-    ]);
+    const requestContext = new RequestContext(
+      buildToolHostContext({
+        walletAddress: this.ownerWallet,
+        ownerWallet: this.ownerWallet,
+        transactionSender: null,
+        txCounter,
+        abortSignal: tickAbort.signal,
+      }) as any,
+    );
 
     try {
       const result = await this.agent.generate(

@@ -5,10 +5,9 @@ import {
   sol,
 } from '@metaplex-foundation/umi';
 import { transferSol } from '@metaplex-foundation/mpl-toolbox';
+import { submitOrSend, type AgentContext } from '@metaplex-foundation/agent-tools';
 import { getConfig } from './config.js';
 import { getServerLimits } from './server-limits.js';
-import { submitOrSend } from './transaction.js';
-import type { AgentContext } from './types/agent.js';
 
 export type FundingResult =
   | { funded: true }
@@ -17,19 +16,12 @@ export type FundingResult =
 /**
  * Ensure the agent keypair has enough SOL to pay for registration / delegation.
  *
- * This helper is mode-aware so that callers (register-agent, delegation tools,
- * etc.) don't have to branch on `AGENT_MODE` themselves:
+ * Mode-aware: in public mode with a connected user wallet, this requests a
+ * small top-up from the user and waits for confirmation. In autonomous mode
+ * (or public mode with no wallet connected), it returns a `funded: false`
+ * result so the caller can surface a helpful error.
  *
- * - If the balance is already above the funding threshold: returns immediately.
- * - In public mode with a connected user wallet: requests a small top-up from
- *   the user, awaits their signature, and polls until the confirmed balance
- *   clears the threshold.
- * - In autonomous mode, or public mode with no connected wallet: returns a
- *   `funded: false` result carrying the exact address and amount the operator
- *   needs to fund manually. The caller translates this to a tool error.
- *
- * The mode check lives here, at the funding-policy seam — not inside each
- * consumer tool.
+ * Hosts wire this as the `ensureFunded` callback in the tool context.
  */
 export async function ensureAgentFunded(
   umi: Umi,
@@ -70,15 +62,10 @@ export async function ensureAgentFunded(
   // Build a minimal funding context — we explicitly zero the fee so the
   // registration top-up itself doesn't try to prepend another fee transfer.
   const fundingContext: AgentContext = {
-    walletAddress: ctx.walletAddress,
-    transactionSender: ctx.transactionSender,
+    ...ctx,
     agentMode: 'public',
     agentAssetAddress: null,
-    agentTokenMint: ctx.agentTokenMint,
     agentFeeSol: 0,
-    tokenOverride: ctx.tokenOverride,
-    ownerWallet: ctx.ownerWallet,
-    txCounter: ctx.txCounter,
   };
 
   await submitOrSend(umi, builder, fundingContext, {

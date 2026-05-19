@@ -45,29 +45,11 @@ function getStatePath(): string {
 // Autonomous-mode state shapes
 // ---------------------------------------------------------------------------
 
-export interface Goal {
-  id: string;
-  description: string;
-  createdAt: string;
-  status: 'active' | 'achieved' | 'abandoned';
-}
-
-export interface Task {
-  id: string;
-  goalId: string | null;
-  description: string;
-  status: 'pending' | 'in_progress' | 'done' | 'failed';
-  createdAt: string;
-  completedAt: string | null;
-  result: string | null;
-}
-
-export interface JournalEntry {
-  ts: string;
-  kind: 'tick' | 'goal_set' | 'pause' | 'unpause' | 'error';
-  summary: string;
-  txSigs: string[];
-}
+// Goal / Task / JournalEntry are defined in the toolkit (part of the
+// StateStore contract). Re-export so existing consumers of this module's
+// surface still find them here.
+export type { Goal, Task, JournalEntry } from '@metaplex-foundation/agent-tools';
+import type { Goal, Task, JournalEntry } from '@metaplex-foundation/agent-tools';
 
 export interface AgentState {
   // Identity (set by register-agent / launch-token)

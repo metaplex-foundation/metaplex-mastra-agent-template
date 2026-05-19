@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { getConfig } from '@metaplex-foundation/shared';
-import { publicAgentTools } from './tools/index.js';
+import { publicBundle } from '@metaplex-foundation/agent-tools';
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';
 
@@ -29,6 +29,6 @@ export function createPublicAgent() {
     name: config.ASSISTANT_NAME,
     instructions: buildSystemPrompt('public', normalizedPersona),
     model: config.LLM_MODEL,
-    tools: publicAgentTools,
+    tools: publicBundle,
   });
 }

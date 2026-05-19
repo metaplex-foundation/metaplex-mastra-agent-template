@@ -16,6 +16,7 @@ import {
   isAuthorized,
   AllowlistFile,
   WalletRateLimiter,
+  buildToolHostContext,
   type SiwsParams,
   type ServerMessage,
   type TransactionSender,
@@ -967,23 +968,15 @@ export class PlexChatServer {
           this.awaitTransaction(session, txBase64, options),
       };
 
-      // We build RequestContext with the AgentContext keys plus an extra
-      // `abortSignal` entry (Workstream B's sleep tool reads it). The
-      // AgentContext-typed generic enforces a fixed key set, so we widen
-      // the generic to AgentContext plus the extra key. Tools that read it
-      // can cast back to AgentContext where convenient.
-      type ExtendedContext = AgentContext & { abortSignal: AbortSignal };
-      const requestContext = new RequestContext<ExtendedContext>([
-        ['walletAddress', session.walletAddress],
-        ['transactionSender', transactionSender],
-        ['agentMode', config.AGENT_MODE],
-        ['agentAssetAddress', config.AGENT_ASSET_ADDRESS ?? null],
-        ['agentTokenMint', config.AGENT_TOKEN_MINT ?? null],
-        ['agentFeeSol', config.AGENT_FEE_SOL],
-        ['tokenOverride', config.TOKEN_OVERRIDE ?? null],
-        ['ownerWallet', this.ownerWallet],
-        ['abortSignal', session.currentAbortController.signal],
-      ]);
+      const requestContext = new RequestContext(
+        buildToolHostContext({
+          walletAddress: session.walletAddress,
+          ownerWallet: this.ownerWallet,
+          transactionSender,
+          txCounter: null,
+          abortSignal: session.currentAbortController.signal,
+        }) as any,
+      );
 
       // C1: sanitize both the agent status label and the user wallet before
       // interpolating into the `[Agent: … | User wallet: X]` prefix. Previously

@@ -280,109 +280,151 @@ The chat UI is a separate repo: [metaplex-agent-chat-template](https://github.co
 
 ## Adding New Tools
 
-Tools live under `packages/core/src/tools/` in one of two subdirectories:
+Tools ship as the [`@metaplex-foundation/agent-tools`](https://www.npmjs.com/package/@metaplex-foundation/agent-tools) npm package. The template imports two named bundles — `publicBundle` and `autonomousBundle` — and passes them straight to `new Agent({ tools })`. To select a different subset, build your own:
 
-- **`shared/`** -- available in both public and autonomous modes (12 tools ship in this directory)
-- **`public/`** -- only registered in public mode (`transfer-sol`, `transfer-token`)
+```ts
+import { createToolset } from '@metaplex-foundation/agent-tools';
 
-Pick the one that matches your tool's scope.
+const tools = createToolset({
+  include: ['get-balance', 'category:trade'],
+  exclude: ['withdraw-sol'],
+  capabilities: ['umi-rpc', 'agent-keypair', 'jupiter'],
+});
+```
 
-### 1. Create the tool file
+`include` accepts tool ids, `'*'`, or `'category:<name>'`; `exclude` accepts the same shapes. `capabilities` declares what the host can fulfil — included tools whose `requires` isn't a subset throw at build time.
 
-Here is an example read-only tool placed in `shared/`:
+### Tools are pure — they read everything from `RequestContext`
 
-```typescript
-// packages/core/src/tools/shared/get-account-info.ts
+The toolkit ships tools that never call `getConfig()`, `getState()`, or `createUmi()` directly. Every value a tool needs — `umi`, `dryRun`, `maxSlippageBps`, `jupiterApiKey`, a `StateStore`, `onAssetRegistered`/`onTokenLaunched`/`ensureFunded` callbacks — arrives via the Mastra `RequestContext`.
 
-import { createTool } from '@mastra/core/tools';
+This template wires that context up in `packages/shared/src/tool-host-context.ts`:
+
+```ts
+import { buildToolHostContext } from '@metaplex-foundation/shared';
+import { RequestContext } from '@mastra/core/request-context';
+
+const requestContext = new RequestContext(
+  buildToolHostContext({
+    walletAddress: session.walletAddress,
+    ownerWallet: this.ownerWallet,
+    transactionSender,
+    txCounter: null,
+    abortSignal: session.currentAbortController.signal,
+  }) as any,
+);
+```
+
+`buildToolHostContext({...})` reads `getConfig()` + `agent-state.json` and produces the full `AgentContext` entry array. The server and worker loop both use it.
+
+### Authoring a new tool (in the tools repo)
+
+```ts
+// metaplex-agent-tools/src/tools/get-account-info.ts
 import { z } from 'zod';
 import { publicKey } from '@metaplex-foundation/umi';
-import { createUmi } from '@metaplex-foundation/shared';
+import {
+  defineTool,
+  readAgentContext,
+  ok, err, toToolError,
+} from '@metaplex-foundation/agent-tools';
 
-export const getAccountInfo = createTool({
+export const getAccountInfo = defineTool({
   id: 'get-account-info',
+  authLevel: 'public',
+  category: 'read',
+  requires: ['umi-rpc'],
   description: 'Get basic account info for a Solana address.',
   inputSchema: z.object({
     address: z.string().describe('Solana wallet address'),
   }),
   outputSchema: z.object({
-    address: z.string(),
-    exists: z.boolean(),
+    status: z.string().optional(),
+    code: z.string().optional(),
+    address: z.string().optional(),
+    exists: z.boolean().optional(),
     lamports: z.string().optional(),
     owner: z.string().optional(),
+    message: z.string().optional(),
   }),
-  execute: async ({ address }) => {
-    const umi = createUmi();
-    const account = await umi.rpc.getAccount(publicKey(address));
-
-    if (!account.exists) {
-      return { address, exists: false };
+  execute: async ({ address }, { requestContext }) => {
+    try {
+      const { umi } = readAgentContext(requestContext);
+      const account = await umi.rpc.getAccount(publicKey(address));
+      if (!account.exists) return ok({ address, exists: false });
+      return ok({
+        address,
+        exists: true,
+        lamports: account.lamports.basisPoints.toString(),
+        owner: account.owner.toString(),
+      });
+    } catch (e) {
+      const { code, message } = toToolError(e);
+      return err(code, message);
     }
-
-    return {
-      address,
-      exists: true,
-      lamports: account.lamports.basisPoints.toString(),
-      owner: account.owner.toString(),
-    };
   },
 });
 ```
 
-### 2. Register the tool
+`defineTool` registers the tool in the in-memory registry as a side-effect. Re-export it from `src/tools/index.ts` and the bundles + `createToolset` see it automatically.
 
-Add the import and entry to `packages/core/src/tools/shared/index.ts` (or `public/index.ts` for public-only tools):
+### Authoring a one-off tool (in this template)
 
-```typescript
-// packages/core/src/tools/shared/index.ts
-import { getBalance } from './get-balance.js';
-import { getTokenBalances } from './get-token-balances.js';
-import { getTransaction } from './get-transaction.js';
-// ...existing imports...
-import { getAccountInfo } from './get-account-info.js';  // <-- add import
+If a tool is fork-specific and shouldn't live in the shared tools repo, call `defineTool` directly in the template and combine the result with a bundle:
 
-export const sharedTools = {
-  getBalance,
-  getTokenBalances,
-  getTransaction,
-  // ...existing tools...
-  getAccountInfo,  // <-- add to registry
-};
+```ts
+import { defineTool, publicBundle, ok } from '@metaplex-foundation/agent-tools';
+import { z } from 'zod';
+
+const myCustomTool = defineTool({
+  id: 'my-custom-thing',
+  authLevel: 'public',
+  category: 'utility',
+  requires: [],
+  description: 'Does the custom thing.',
+  inputSchema: z.object({ x: z.string() }),
+  outputSchema: z.object({ status: z.string().optional(), echo: z.string().optional() }),
+  execute: async ({ x }) => ok({ echo: x }),
+});
+
+new Agent({
+  // ...
+  tools: { ...publicBundle, myCustomThing: myCustomTool },
+});
 ```
-
-That is all that is needed. Mastra automatically exposes registered tools to the LLM. The top-level `tools/index.ts` composes `sharedTools` + `publicTools` (public mode) or just `sharedTools` (autonomous mode).
 
 ### 3. Tools that write transactions
 
-For tools that build and submit transactions, use the `submitOrSend` helper from `@metaplex-foundation/shared`. This function handles both agent modes automatically:
+For tools that build and submit transactions, use the `submitOrSend` helper from `@metaplex-foundation/agent-tools`. It handles both agent modes automatically:
 
 - **Public mode:** serializes the transaction to base64, pushes it to the connected client, and **awaits** the user's signature. Returns the confirmed signature (or throws on rejection/timeout).
 - **Autonomous mode:** signs with the agent keypair and submits directly to the network. Returns the signature.
 
-Either way, `submitOrSend` returns a real `Promise<string>` resolving to the base58 signature -- there is no longer a `'sent-to-wallet'` pending state to branch on.
+Either way, `submitOrSend` returns a real `Promise<string>` resolving to the base58 signature.
 
-See `packages/core/src/tools/public/transfer-sol.ts` for the full pattern. The key parts:
+See `metaplex-agent-tools/src/tools/transfer-sol.ts` for the full pattern. The key parts:
 
 ```typescript
-import { submitOrSend, createUmi, readAgentContext, ok, err } from '@metaplex-foundation/shared';
+import {
+  submitOrSend, readAgentContext, ok, err,
+} from '@metaplex-foundation/agent-tools';
 
 // Inside your tool's execute function:
 execute: async ({ destination, amount }, { requestContext }) => {
-  // Extract the full AgentContext from RequestContext (handles defaults for you).
+  // Extract the full AgentContext from RequestContext (umi, walletAddress,
+  // dryRun, etc. — see AgentContext type for the full list).
   const context = readAgentContext(requestContext);
 
-  const umi = createUmi();
-
   // Build the transaction using Umi / mpl-toolbox
-  const builder = transferSolIx(umi, { /* ... */ });
+  const builder = transferSolIx(context.umi, { /* ... */ });
 
   try {
     // Submit or send -- handles both modes, returns the signature
-    const signature = await submitOrSend(umi, builder, context, {
+    const signature = await submitOrSend(context.umi, builder, context, {
       message: `Transfer ${amount} SOL to ${destination}`,
     });
 
-    // Use the ok()/info()/err() helpers from @metaplex-foundation/shared for a
+    // Use the ok()/info()/err() helpers from @metaplex-foundation/agent-tools for a
     // consistent ToolResult<T> shape the LLM can branch on (`status` field).
     return ok({ signature, message: `Done. Signature: ${signature}` });
   } catch (e) {
