@@ -38,3 +38,22 @@
 #   max_slippage_bps: 500
 #   # Cap on Jupiter quote price impact (percent). Default 2.0.
 #   max_price_impact_pct: 2.0
+
+# Tool selection. Optional — when this section is OMITTED, the agent keeps
+# its mode default (public → publicBundle, autonomous → autonomousBundle).
+# When PRESENT, the include/exclude lists fully replace that default — so
+# opting in is all-or-nothing and behavior stays predictable.
+#
+# Each entry is one of:
+#   - a tool id           e.g. 'get-balance', 'swap-token'
+#   - the literal '*'     — every registered tool
+#   - 'category:<name>'   — every tool in that category
+#                           (read, trade, registration, transfer, treasury,
+#                            autonomous-only)
+#
+# `exclude` is applied AFTER `include`, so '*' + targeted excludes is a
+# convenient way to opt out of one or two tools while keeping the rest.
+#
+# tools:
+#   include: ['category:read', 'category:trade']
+#   exclude: ['withdraw-sol']

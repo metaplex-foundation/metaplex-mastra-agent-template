@@ -6,7 +6,10 @@ import {
   restoreEnv,
   defaultTestEnv,
 } from '../../../shared/test/helpers/env.js';
-import { _resetConfigForTests } from '@metaplex-foundation/shared';
+import {
+  _resetConfigForTests,
+  _setAgentConfigFileForTests,
+} from '@metaplex-foundation/shared';
 import { createAgent } from '../../src/create-agent.js';
 import {
   publicBundle as publicAgentTools,
@@ -36,6 +39,9 @@ const VALID_BOOTSTRAP = 'AS3yQUgPgsEctYHJ8gJ5xZyL2Nq7kJZ5dq8Hh6BvjMq2';
 afterEach(() => {
   restoreEnv();
   _resetConfigForTests();
+  // Clear the cached yaml overlay so a test that injected one doesn't
+  // bleed into the next case.
+  _setAgentConfigFileForTests(null);
 });
 
 // --- Helper -----------------------------------------------------------
@@ -179,6 +185,76 @@ test('createAgent throws when AGENT_MODE is invalid', () => {
     () => createAgent(),
     /AGENT_MODE|Invalid environment configuration/,
   );
+});
+
+// --- Config-driven tool selection -------------------------------------
+
+test('public-mode agent honors tools.include from agent.config.yaml', async () => {
+  isolateEnv(defaultTestEnv({ AGENT_KEYPAIR }));
+  _setAgentConfigFileForTests({
+    tools: { include: ['get-balance', 'get-token-price'] },
+  });
+  const agent = createAgent();
+  const names = await listToolNames(agent);
+  assert.deepEqual(names, ['getBalance', 'getTokenPrice']);
+});
+
+test('public-mode agent honors tools.exclude on top of include', async () => {
+  isolateEnv(defaultTestEnv({ AGENT_KEYPAIR }));
+  _setAgentConfigFileForTests({
+    tools: { include: ['category:read'], exclude: ['get-transaction'] },
+  });
+  const agent = createAgent();
+  const names = await listToolNames(agent);
+  assert.ok(names.includes('getBalance'), 'read-category tools must be included');
+  assert.ok(!names.includes('getTransaction'), 'excluded tool must be dropped');
+});
+
+test('public-mode agent with tools.include can opt INTO autonomous-only tools', async () => {
+  // The yaml selection deliberately bypasses the mode default — operators
+  // who explicitly include autonomous-only tools accept that they may only
+  // work meaningfully in autonomous mode. This test pins that the
+  // selection is the source of truth.
+  isolateEnv(defaultTestEnv({ AGENT_KEYPAIR }));
+  _setAgentConfigFileForTests({
+    tools: { include: ['get-balance', 'set-goal'] },
+  });
+  const agent = createAgent();
+  const names = await listToolNames(agent);
+  assert.ok(names.includes('setGoal'), 'explicitly included tool must appear regardless of mode');
+});
+
+test('autonomous-mode agent honors tools.include from agent.config.yaml', async () => {
+  isolateEnv(
+    defaultTestEnv({
+      AGENT_MODE: 'autonomous',
+      AGENT_KEYPAIR,
+      BOOTSTRAP_WALLET: VALID_BOOTSTRAP,
+    }),
+  );
+  _setAgentConfigFileForTests({
+    tools: { include: ['get-balance', 'set-goal'] },
+  });
+  const agent = createAgent();
+  const names = await listToolNames(agent);
+  assert.deepEqual(names, ['getBalance', 'setGoal']);
+});
+
+test('missing tools section preserves the mode default (public)', async () => {
+  // Sanity: opting OUT of the tools section must be a no-op vs. today.
+  // The above default-toolset tests already cover this — this one just
+  // pins the contract explicitly so a future regression is easier to spot.
+  isolateEnv(defaultTestEnv({ AGENT_KEYPAIR }));
+  _setAgentConfigFileForTests(null);
+  const agent = createAgent();
+  const names = await listToolNames(agent);
+  assert.deepEqual(names, Object.keys(publicAgentTools).sort());
+});
+
+test('unknown tool id in include throws a helpful error', () => {
+  isolateEnv(defaultTestEnv({ AGENT_KEYPAIR }));
+  _setAgentConfigFileForTests({ tools: { include: ['not-a-real-tool'] } });
+  assert.throws(() => createAgent(), /unknown tool id/);
 });
 
 // --- Persona handling --------------------------------------------------

@@ -37,12 +37,28 @@ const LIMITS_SCHEMA = z
   })
   .strict();
 
+/**
+ * Tool-selection overlay. Each entry is a `createToolset` selector — a tool id
+ * (`get-balance`), the literal `*`, or `category:<name>`. When the `tools`
+ * section is omitted entirely, the agent factory keeps using the historical
+ * mode-default bundle (public → publicBundle, autonomous → autonomousBundle).
+ * When present, the listed selectors fully replace that default — operators
+ * who opt in opt in completely.
+ */
+const TOOLS_SCHEMA = z
+  .object({
+    include: z.array(z.string().min(1)).optional(),
+    exclude: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
 const AGENT_CONFIG_SCHEMA = z
   .object({
     agent_name: z.string().min(1).optional(),
     persona: z.string().min(1).optional(),
     worker: WORKER_SCHEMA.optional(),
     limits: LIMITS_SCHEMA.optional(),
+    tools: TOOLS_SCHEMA.optional(),
   })
   .strict();
 
