@@ -1,11 +1,21 @@
 import { Agent } from '@mastra/core/agent';
-import { getConfig } from '@metaplex-foundation/shared';
-import { publicBundle } from '@metaplex-foundation/agent-tools';
+import { getConfig, getAgentConfigFile } from '@metaplex-foundation/shared';
+import { createToolset, publicBundle } from '@metaplex-foundation/agent-tools';
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';
 
 export function createPublicAgent() {
   const config = getConfig();
+  const toolsConfig = getAgentConfigFile()?.tools;
+  // Operator-supplied `tools:` fully replaces the mode default — opting in
+  // is all-or-nothing so behavior is predictable. Absent → keep the
+  // historical publicBundle so existing forks see no change on upgrade.
+  const tools = toolsConfig
+    ? createToolset({
+        include: toolsConfig.include,
+        exclude: toolsConfig.exclude,
+      })
+    : publicBundle;
   const personaName = config.AGENT_PERSONA;
   // Use `Object.hasOwn` rather than the `in` operator so prototype-chain
   // keys (`toString`, `constructor`, …) can't masquerade as personas.
@@ -29,6 +39,6 @@ export function createPublicAgent() {
     name: config.ASSISTANT_NAME,
     instructions: buildSystemPrompt('public', normalizedPersona),
     model: config.LLM_MODEL,
-    tools: publicBundle,
+    tools,
   });
 }

@@ -128,6 +128,53 @@ test('applyAgentConfigToEnv treats empty-string env vars as unset (so YAML can f
   assert.equal(target.AGENT_PERSONA, 'default');
 });
 
+test('loadAgentConfigFile parses a tools section with include and exclude lists', () => {
+  const yaml = `
+tools:
+  include:
+    - 'category:read'
+    - swap-token
+  exclude:
+    - withdraw-sol
+`;
+  const path = makeTmpYaml(yaml);
+  const result = loadAgentConfigFile(path);
+  assert.deepEqual(result, {
+    tools: {
+      include: ['category:read', 'swap-token'],
+      exclude: ['withdraw-sol'],
+    },
+  });
+});
+
+test('loadAgentConfigFile accepts a tools section with only include OR only exclude', () => {
+  const onlyInclude = makeTmpYaml(`tools:\n  include: ['*']\n`);
+  assert.deepEqual(loadAgentConfigFile(onlyInclude), { tools: { include: ['*'] } });
+
+  const onlyExclude = makeTmpYaml(`tools:\n  exclude: ['withdraw-sol']\n`);
+  assert.deepEqual(loadAgentConfigFile(onlyExclude), { tools: { exclude: ['withdraw-sol'] } });
+});
+
+test('loadAgentConfigFile rejects unknown keys inside tools section', () => {
+  const path = makeTmpYaml(`tools:\n  preset: public\n`);
+  assert.throws(() => loadAgentConfigFile(path), /preset/);
+});
+
+test('loadAgentConfigFile rejects empty-string selectors in tools.include/exclude', () => {
+  const path = makeTmpYaml(`tools:\n  include: ['']\n`);
+  assert.throws(() => loadAgentConfigFile(path));
+});
+
+test('agentConfigToEnvDefaults ignores the tools section (structured, not env-shaped)', () => {
+  // The tools section deliberately bypasses env layering — it's read
+  // structurally by the agent factory via getAgentConfigFile(). Make sure
+  // we don't accidentally emit a junk env var for it.
+  const env = agentConfigToEnvDefaults({
+    tools: { include: ['*'], exclude: ['withdraw-sol'] },
+  });
+  assert.equal(Object.keys(env).length, 0);
+});
+
 test('applyAgentConfigToEnv handles boolean dry_run via string conversion', () => {
   const target = {} as Record<string, string>;
   applyAgentConfigToEnv({ worker: { dry_run: false } }, target);

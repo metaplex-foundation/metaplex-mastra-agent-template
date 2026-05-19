@@ -5,7 +5,11 @@ import { z } from 'zod';
 import bs58 from 'bs58';
 import { getState } from './state.js';
 import { AllowlistFile } from './allowlist-file.js';
-import { loadAgentConfigFile, applyAgentConfigToEnv } from './agent-config.js';
+import {
+  loadAgentConfigFile,
+  applyAgentConfigToEnv,
+  type AgentConfigFile,
+} from './agent-config.js';
 
 // Load .env from workspace root — walk up from cwd until we find it
 function findEnvFile(from: string): string {
@@ -27,10 +31,17 @@ config({ path: findEnvFile(process.cwd()) });
 // agent name). Layered UNDER process.env so a deploy-time env override
 // always wins. Missing file is the common case (the file is optional);
 // malformed file throws here at module load with an actionable message.
+// Cache the parsed file so structured (non-scalar) sections — currently
+// `tools:` — are reachable from downstream modules without re-reading and
+// re-validating the yaml. Scalar fields still flow through the env layering
+// below (`applyAgentConfigToEnv`) so operator overrides via process.env
+// continue to win.
+let _agentConfigFile: AgentConfigFile | null = null;
+
 try {
-  const agentCfg = loadAgentConfigFile();
-  if (agentCfg) {
-    const written = applyAgentConfigToEnv(agentCfg);
+  _agentConfigFile = loadAgentConfigFile();
+  if (_agentConfigFile) {
+    const written = applyAgentConfigToEnv(_agentConfigFile);
     const keys = Object.keys(written);
     if (keys.length > 0) {
       // Single-line summary so operators see at a glance which fields the
@@ -42,6 +53,25 @@ try {
   // Re-throw — unrecoverable. The original error already names the file
   // and line so the operator can fix it without further hints.
   throw err;
+}
+
+/**
+ * Return the parsed `agent.config.yaml` overlay (or null when the file is
+ * absent). Read at module load — subsequent edits to the file on disk are
+ * NOT picked up. Intended for structured sections like `tools:` that don't
+ * round-trip cleanly through process.env.
+ */
+export function getAgentConfigFile(): AgentConfigFile | null {
+  return _agentConfigFile;
+}
+
+/**
+ * Test-only: replace the cached parsed yaml. Production code never calls
+ * this — the cache is set once at module load. Tests use it to inject a
+ * synthetic overlay without writing a temp file.
+ */
+export function _setAgentConfigFileForTests(cfg: AgentConfigFile | null): void {
+  _agentConfigFile = cfg;
 }
 
 // ---------------------------------------------------------------------------
