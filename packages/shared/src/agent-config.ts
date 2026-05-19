@@ -43,14 +43,29 @@ const LIMITS_SCHEMA = z
  * section is omitted entirely, the agent factory keeps using the historical
  * mode-default bundle (public → publicBundle, autonomous → autonomousBundle).
  * When present, the listed selectors fully replace that default — operators
- * who opt in opt in completely.
+ * who opt in opt in completely. This overlay never merges with
+ * publicBundle/autonomousBundle; it replaces them outright.
+ *
+ * Precedence when both `include` and `exclude` are supplied: inclusions are
+ * resolved first to form the candidate set, then exclusions are subtracted
+ * from it — so `exclude` wins and removes any items that `include` brought
+ * in. The same precedence applies to every selector form (tool id, `*`,
+ * `category:<name>`), e.g. `include: ['*'], exclude: ['withdraw-sol']`
+ * yields every registered tool minus `withdraw-sol`.
+ *
+ * At least one of `include` or `exclude` must be provided — an empty
+ * `tools: {}` would silently expand to every registered tool (createToolset's
+ * default include is `*`), which is almost never what an operator intends.
  */
 const TOOLS_SCHEMA = z
   .object({
     include: z.array(z.string().trim().min(1)).optional(),
     exclude: z.array(z.string().trim().min(1)).optional(),
   })
-  .strict();
+  .strict()
+  .refine((obj) => obj.include !== undefined || obj.exclude !== undefined, {
+    message: 'one of include or exclude must be provided',
+  });
 
 const AGENT_CONFIG_SCHEMA = z
   .object({
