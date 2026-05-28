@@ -128,7 +128,10 @@ async function checkRpc(): Promise<void> {
     const cfg = getConfig();
     const umi = createUmi();
     const slot = await umi.rpc.getSlot();
-    add('Solana RPC', 'ok', `${cfg.SOLANA_RPC_URL} (slot ${slot})`);
+    const endpoint = cfg.PLUMBER_URL
+      ? `${cfg.PLUMBER_URL} (via plumber)`
+      : cfg.SOLANA_RPC_URL;
+    add('Solana RPC', 'ok', `${endpoint} (slot ${slot})`);
   } catch (err) {
     add('Solana RPC', 'fail', err instanceof Error ? err.message : String(err));
   }
@@ -139,6 +142,10 @@ async function checkLlmKey(): Promise<void> {
   try {
     const { getConfig } = await import('@metaplex-foundation/shared');
     const cfg = getConfig();
+    if (cfg.PLUMBER_URL) {
+      add('LLM key', 'skip', `PLUMBER_URL set — inference routed through ${cfg.PLUMBER_URL}; no local key needed`);
+      return;
+    }
     const provider = cfg.LLM_MODEL.split('/')[0]?.toLowerCase();
     const map: Record<string, string> = {
       anthropic: 'ANTHROPIC_API_KEY',
@@ -152,7 +159,7 @@ async function checkLlmKey(): Promise<void> {
     }
     const value = process.env[expected];
     if (!value) {
-      add('LLM key', 'fail', `${expected} not set (required by LLM_MODEL=${cfg.LLM_MODEL})`);
+      add('LLM key', 'fail', `${expected} not set (required by LLM_MODEL=${cfg.LLM_MODEL}; or set PLUMBER_URL)`);
       return;
     }
     // Presence-only — don't burn API credits with a real probe call.

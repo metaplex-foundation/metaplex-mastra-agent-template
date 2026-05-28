@@ -38,6 +38,10 @@ export {
   BASE58_ADDRESS_RE, BASE58_SIGNATURE_RE,
 } from '@metaplex-foundation/agent-tools';
 
+// Plumber-backed inference / RPC client (BYOK-free LLM + Solana RPC + DAS).
+export * from './plumber-client.js';
+export * from './agent-model.js';
+
 // Transport-only modules that stay in shared:
 export * from './siws.js';
 export * from './nonce-store.js';

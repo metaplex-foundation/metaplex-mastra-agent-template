@@ -241,17 +241,42 @@ export class PlexChatServer {
     }
 
     // --- Preflight: RPC connectivity ---
-    try {
-      const umi = createUmi();
-      await umi.rpc.getSlot();
-    } catch (err) {
-      const message =
-        'Startup preflight failed: could not reach Solana RPC.\n' +
-        '  RPC URL: ' + config.SOLANA_RPC_URL + '\n' +
-        '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
-        '  Hint: check SOLANA_RPC_URL in .env and your network connection.';
-      console.error(message);
-      throw new Error(message);
+    // In plumber mode the RPC layer routes through `${PLUMBER_URL}/v1/solana/rpc`
+    // and EVERY call is paid (x402 or delegation). A real `getSlot()` probe
+    // would burn SOL every boot and would also fail before the agent is
+    // registered (since the handshake checks delegation on-chain). Instead
+    // probe plumber's unauthenticated `/healthz` — cheap, deterministic,
+    // tells us the same thing for the boot-time check.
+    if (config.PLUMBER_URL) {
+      const healthUrl = `${config.PLUMBER_URL.replace(/\/+$/, '')}/healthz`;
+      try {
+        const res = await fetch(healthUrl);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (err) {
+        const message =
+          'Startup preflight failed: could not reach plumber.\n' +
+          '  PLUMBER_URL: ' + config.PLUMBER_URL + '\n' +
+          '  Probed: ' + healthUrl + '\n' +
+          '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
+          '  Hint: check PLUMBER_URL in .env and confirm the service is running.';
+        console.error(message);
+        throw new Error(message);
+      }
+    } else {
+      try {
+        const umi = createUmi();
+        await umi.rpc.getSlot();
+      } catch (err) {
+        const message =
+          'Startup preflight failed: could not reach Solana RPC.\n' +
+          '  RPC URL: ' + config.SOLANA_RPC_URL + '\n' +
+          '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
+          '  Hint: check SOLANA_RPC_URL in .env and your network connection.';
+        console.error(message);
+        throw new Error(message);
+      }
     }
 
     // Pass a request handler to createServer so plain HTTP requests (the
@@ -361,7 +386,11 @@ export class PlexChatServer {
         console.log(`PlexChat WebSocket server running on ws://localhost:${boundPort}`);
         console.log(`Agent mode: ${config.AGENT_MODE}`);
         console.log(`Agent name: ${config.ASSISTANT_NAME}`);
-        console.log(`RPC: ${config.SOLANA_RPC_URL}`);
+        console.log(
+          config.PLUMBER_URL
+            ? `RPC: ${config.PLUMBER_URL}/v1/solana/rpc (via plumber)`
+            : `RPC: ${config.SOLANA_RPC_URL}`,
+        );
         // The chat template's `next dev` hardcodes :3001. If the operator
         // overrides that port locally, this URL won't match — but neither
         // would the previous bare `http://localhost:3001`, so we're not

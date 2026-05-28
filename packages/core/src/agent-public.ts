@@ -1,8 +1,13 @@
 import { Agent } from '@mastra/core/agent';
-import { getConfig, getAgentConfigFile } from '@metaplex-foundation/shared';
-import { createToolset, publicBundle } from '@metaplex-foundation/agent-tools';
+import { getConfig, getAgentConfigFile, resolveAgentModel } from '@metaplex-foundation/shared';
+import {
+  createToolset,
+  publicBundle,
+  type ToolDefinition,
+} from '@metaplex-foundation/agent-tools';
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';
+import { delegateToNori } from './tools/delegate-to-nori.js';
 
 export function createPublicAgent() {
   const config = getConfig();
@@ -10,12 +15,22 @@ export function createPublicAgent() {
   // Operator-supplied `tools:` fully replaces the mode default — opting in
   // is all-or-nothing so behavior is predictable. Absent → keep the
   // historical publicBundle so existing forks see no change on upgrade.
-  const tools = toolsConfig
+  const baseTools = toolsConfig
     ? createToolset({
         include: toolsConfig.include,
         exclude: toolsConfig.exclude,
       })
     : publicBundle;
+  // delegate-to-nori is only useful when PLUMBER_URL is set. We always
+  // include it — the tool itself short-circuits with a clear message when
+  // unset, which is friendlier than hiding it conditionally.
+  // The widened `Record<string, ToolDefinition>` annotation keeps TS from
+  // inferring a parameterized return type that references the agent-tools
+  // ToolDefinition through a deep node_modules path (TS2883).
+  const tools: Record<string, ToolDefinition> = {
+    ...baseTools,
+    'delegate-to-nori': delegateToNori,
+  };
   const personaName = config.AGENT_PERSONA;
   // Use `Object.hasOwn` rather than the `in` operator so prototype-chain
   // keys (`toString`, `constructor`, …) can't masquerade as personas.
@@ -38,7 +53,7 @@ export function createPublicAgent() {
     id: 'metaplex-agent-public',
     name: config.ASSISTANT_NAME,
     instructions: buildSystemPrompt('public', normalizedPersona),
-    model: config.LLM_MODEL,
+    model: resolveAgentModel(),
     tools,
   });
 }

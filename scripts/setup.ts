@@ -169,28 +169,61 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. LLM provider + key
-  console.log('\n3. LLM provider\n');
-  console.log('  1) Anthropic (default)');
-  console.log('  2) OpenAI');
-  console.log('  3) Google\n');
-  const PROVIDERS = {
-    '1': { key: 'ANTHROPIC_API_KEY' as const, model: 'anthropic/claude-sonnet-4-5-20250929' },
-    '2': { key: 'OPENAI_API_KEY' as const, model: 'openai/gpt-4o' },
-    '3': { key: 'GOOGLE_GENERATIVE_AI_API_KEY' as const, model: 'google/gemini-2.5-pro' },
-  } satisfies Record<string, { key: string; model: string }>;
-  let provider: typeof PROVIDERS[keyof typeof PROVIDERS] | null = null;
-  while (provider === null) {
-    const raw = (await ask('Pick provider [1-3]', '1')).trim();
-    if (raw in PROVIDERS) {
-      provider = PROVIDERS[raw as keyof typeof PROVIDERS];
-    } else {
-      console.log(`  "${raw}" is not a valid choice. Enter 1, 2, or 3.`);
+  // 3. Inference source — plumber (BYOK-free) OR a direct provider key
+  console.log('\n3. Inference source\n');
+  console.log('  1) agent-plumber URL — BYOK-free; the agent pays per-call in SOL');
+  console.log('  2) Anthropic / OpenAI / Google API key (direct)');
+  console.log();
+
+  type ProviderKey = 'ANTHROPIC_API_KEY' | 'OPENAI_API_KEY' | 'GOOGLE_GENERATIVE_AI_API_KEY';
+  let plumberUrl = '';
+  let providerKey: ProviderKey | null = null;
+  let llmModel: string = 'anthropic/claude-sonnet-4-5-20250929';
+  let llmKey = '';
+
+  while (true) {
+    const choice = (await ask('Pick source [1-2]', '1')).trim();
+    if (choice === '1') {
+      const url = (await ask('Plumber base URL (e.g. https://plumber.example.com)')).trim();
+      if (url.length === 0) {
+        console.log('  URL is required for plumber mode. Pick 2 if you don\'t have one yet.');
+        continue;
+      }
+      try {
+        new URL(url);
+      } catch {
+        console.log('  Not a valid URL. Try again.');
+        continue;
+      }
+      plumberUrl = url;
+      break;
     }
+    if (choice === '2') {
+      console.log('\n  LLM provider:');
+      console.log('    1) Anthropic (default)');
+      console.log('    2) OpenAI');
+      console.log('    3) Google\n');
+      const PROVIDERS = {
+        '1': { key: 'ANTHROPIC_API_KEY' as const, model: 'anthropic/claude-sonnet-4-5-20250929' },
+        '2': { key: 'OPENAI_API_KEY' as const, model: 'openai/gpt-4o' },
+        '3': { key: 'GOOGLE_GENERATIVE_AI_API_KEY' as const, model: 'google/gemini-2.5-pro' },
+      } satisfies Record<string, { key: ProviderKey; model: string }>;
+      let provider: typeof PROVIDERS[keyof typeof PROVIDERS] | null = null;
+      while (provider === null) {
+        const raw = (await ask('Pick provider [1-3]', '1')).trim();
+        if (raw in PROVIDERS) {
+          provider = PROVIDERS[raw as keyof typeof PROVIDERS];
+        } else {
+          console.log(`  "${raw}" is not a valid choice. Enter 1, 2, or 3.`);
+        }
+      }
+      providerKey = provider.key;
+      llmModel = provider.model;
+      llmKey = (await ask(`Paste ${providerKey} (leave blank to fill later)`)).trim();
+      break;
+    }
+    console.log(`  "${choice}" is not a valid choice. Enter 1 or 2.`);
   }
-  const providerKey = provider.key;
-  const llmModel = provider.model;
-  const llmKey = (await ask(`Paste ${providerKey} (leave blank to fill later)`)).trim();
 
   // 4. Wallet allowlist (public mode)
   let walletAllowlist = '';
@@ -271,6 +304,8 @@ async function main(): Promise<void> {
 
   replaceOrAppend(/^AGENT_MODE=.*$/m, `AGENT_MODE=${mode}`);
   replaceOrAppend(/^AGENT_KEYPAIR=.*$/m, `AGENT_KEYPAIR=${agentKeypair}`);
+  replaceOrAppend(/^# ?PLUMBER_URL=.*$/m, plumberUrl ? `PLUMBER_URL=${plumberUrl}` : '# PLUMBER_URL=');
+  replaceOrAppend(/^PLUMBER_URL=.*$/m, plumberUrl ? `PLUMBER_URL=${plumberUrl}` : '# PLUMBER_URL=');
   replaceOrAppend(
     /^# ?ANTHROPIC_API_KEY=.*$/m,
     `${providerKey === 'ANTHROPIC_API_KEY' ? '' : '# '}ANTHROPIC_API_KEY=${providerKey === 'ANTHROPIC_API_KEY' ? llmKey : ''}`,
