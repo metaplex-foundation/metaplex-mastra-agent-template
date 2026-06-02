@@ -72,6 +72,13 @@ export class Session {
   aliveCheck: ReturnType<typeof setInterval> | null = null;
   rateLimiter: SimpleRateLimiter;
 
+  /**
+   * Optional unsubscribe for the per-session plumber-payment-event listener.
+   * Set when the session subscribes; called in `cleanup` so we don't leak
+   * listeners on the process-wide emitter.
+   */
+  unsubscribePaymentEvents: (() => void) | null = null;
+
   constructor(ws: WebSocket, rateLimiter: SimpleRateLimiter) {
     this.ws = ws;
     this.id = randomUUID();
@@ -115,6 +122,10 @@ export class Session {
     if (this.currentAbortController) {
       this.currentAbortController.abort();
       this.currentAbortController = null;
+    }
+    if (this.unsubscribePaymentEvents) {
+      this.unsubscribePaymentEvents();
+      this.unsubscribePaymentEvents = null;
     }
     this.rejectAllPendingTransactions(reason);
   }

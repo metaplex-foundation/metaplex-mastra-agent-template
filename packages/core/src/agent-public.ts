@@ -8,6 +8,8 @@ import {
 import { buildSystemPrompt } from './prompts.js';
 import { personas } from './personas/index.js';
 import { delegateToNori } from './tools/delegate-to-nori.js';
+import { listDelegates } from './tools/list-delegates.js';
+import { revokeDelegate } from './tools/revoke-delegate.js';
 
 export function createPublicAgent() {
   const config = getConfig();
@@ -30,6 +32,8 @@ export function createPublicAgent() {
   const tools: Record<string, ToolDefinition> = {
     ...baseTools,
     'delegate-to-nori': delegateToNori,
+    'list-delegates': listDelegates,
+    'revoke-delegate': revokeDelegate,
   };
   const personaName = config.AGENT_PERSONA;
   // Use `Object.hasOwn` rather than the `in` operator so prototype-chain

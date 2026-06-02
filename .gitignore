@@ -11,4 +11,4 @@ coverage/
 agent-state.json
 .next/
 wallets.allowlist.json
-
+wallet.json

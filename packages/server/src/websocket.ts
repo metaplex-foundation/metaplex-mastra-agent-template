@@ -17,6 +17,7 @@ import {
   AllowlistFile,
   WalletRateLimiter,
   buildToolHostContext,
+  onPlumberPayment,
   type SiwsParams,
   type ServerMessage,
   type TransactionSender,
@@ -497,6 +498,16 @@ export class PlexChatServer {
     const session = new Session(ws, new RateLimiter(20, 10000));
     this.sessions.set(ws, session);
 
+    // --- Subscribe to plumber payment events ---
+    // The PlumberClient (in shared/) emits payment events on a process-wide
+    // emitter. Forward them to this session as `debug:ledger` so the chat
+    // UI's Ledger tab can render fund flows live. All sessions see all
+    // payment events (the emitter is process-wide), which is acceptable
+    // for a debugging tab.
+    session.unsubscribePaymentEvents = onPlumberPayment((ev) => {
+      session.send({ type: 'debug:ledger', ...ev });
+    });
+
     // H8: both close and error funnel through the same idempotent cleanup.
     // In the error branch we also call terminate() because ws can emit
     // 'error' without a subsequent 'close' in some socket-level failures.
@@ -870,11 +881,6 @@ export class PlexChatServer {
   private handleTxResult(session: Session, correlationId: string | undefined, signature: string | undefined): void {
     const config = getConfig();
 
-    if (config.AGENT_MODE === 'autonomous') {
-      session.send({ type: 'error', error: 'tx_result is not accepted in autonomous mode', code: 'INVALID_MODE' });
-      return;
-    }
-
     if (typeof correlationId !== 'string' || !correlationId) {
       session.send({ type: 'error', error: 'tx_result.correlationId is required', code: 'MISSING_CORRELATION' });
       return;
@@ -886,6 +892,19 @@ export class PlexChatServer {
     }
 
     const pending = session.pendingTransactions.get(correlationId);
+
+    // In autonomous mode, we don't expect a human signer in the loop —
+    // so reject *unsolicited* tx_results (defense vs. forged messages).
+    // BUT: owner-auth tools like `delegate-to-nori` deliberately route
+    // through `submitWithUserWallet`, which IS expected to round-trip a
+    // user signature. Those create a pending transaction the server
+    // itself tracked, so a matching correlationId means the reply was
+    // solicited and should be accepted regardless of AGENT_MODE.
+    if (config.AGENT_MODE === 'autonomous' && !pending) {
+      session.send({ type: 'error', error: 'tx_result is not accepted in autonomous mode', code: 'INVALID_MODE' });
+      return;
+    }
+
     if (!pending) {
       // M10: Unknown correlationId AND a well-formed base58 signature is the
       // "late-ok" case — the user approved the tx after the pending promise
@@ -916,13 +935,18 @@ export class PlexChatServer {
   private handleTxError(session: Session, correlationId: string | undefined, reason: string | undefined): void {
     const config = getConfig();
 
-    if (config.AGENT_MODE === 'autonomous') {
-      session.send({ type: 'error', error: 'tx_error is not accepted in autonomous mode', code: 'INVALID_MODE' });
+    if (typeof correlationId !== 'string' || !correlationId) {
+      session.send({ type: 'error', error: 'tx_error.correlationId is required', code: 'MISSING_CORRELATION' });
       return;
     }
 
-    if (typeof correlationId !== 'string' || !correlationId) {
-      session.send({ type: 'error', error: 'tx_error.correlationId is required', code: 'MISSING_CORRELATION' });
+    const pending = session.pendingTransactions.get(correlationId);
+
+    // Mirror handleTxResult: reject unsolicited tx_errors in autonomous
+    // mode, but accept replies to a pending tx the server itself opened
+    // (the user-signed path used by owner-auth tools like delegate-to-nori).
+    if (config.AGENT_MODE === 'autonomous' && !pending) {
+      session.send({ type: 'error', error: 'tx_error is not accepted in autonomous mode', code: 'INVALID_MODE' });
       return;
     }
 
@@ -930,7 +954,6 @@ export class PlexChatServer {
       ? reason
       : 'User rejected or wallet error';
 
-    const pending = session.pendingTransactions.get(correlationId);
     if (!pending) {
       session.send({ type: 'error', error: 'Unknown correlationId', code: 'UNKNOWN_CORRELATION' });
       return;

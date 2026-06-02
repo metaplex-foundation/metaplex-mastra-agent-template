@@ -1,5 +1,7 @@
 import { randomUUID } from 'crypto';
+import { EventEmitter } from 'events';
 import bs58 from 'bs58';
+import nacl from 'tweetnacl';
 import {
   Keypair as Web3Keypair,
   PublicKey,
@@ -34,6 +36,70 @@ import { toWeb3JsTransaction } from '@metaplex-foundation/umi-web3js-adapters';
 const NATIVE_SOL_ASSET = 'SOL';
 /** SPL Memo program — used as a plain memo instruction in both paths. */
 const MEMO_PROGRAM_PUBKEY = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+
+// ---------------------------------------------------------------------------
+// Process-wide payment event emitter
+// ---------------------------------------------------------------------------
+
+/**
+ * Fired whenever a payment-shaped thing happens against plumber from this
+ * process. The server's WebSocket session subscribes during a connected
+ * session and forwards each event to the chat UI as a `debug:ledger` so
+ * an operator can watch fund flows in real time.
+ *
+ * Events are global (one emitter per process) — subscribers see ALL
+ * payment activity, not just their own session. For the single-active-
+ * session common case that's fine; for multi-session deployments the
+ * UI shows ALL activity which is still a useful debugging view.
+ */
+export interface PlumberPaymentEvent {
+  /**
+   * Shape categorization:
+   *   - `x402-paid`         — we just paid an x402 invoice
+   *   - `x402-rejected`     — the retry came back with another 402 or error
+   *   - `delegate-charge`   — settled response carried X-PAYMENT-RESPONSE for delegate-pay rail
+   *   - `delegate-onboard`  — we registered ourselves as a delegate of plumber
+   */
+  kind:
+    | 'x402-paid'
+    | 'x402-rejected'
+    | 'delegate-charge'
+    | 'delegate-onboard';
+  label: string;
+  from?: string | null;
+  to?: string | null;
+  amount?: string | null;
+  unit?: string | null;
+  amountDisplay?: string | null;
+  signature?: string | null;
+  cluster?: 'devnet' | 'mainnet-beta' | 'testnet' | null;
+  ts: string;
+  detail?: Record<string, unknown> | null;
+}
+
+const paymentEvents = new EventEmitter();
+// Plenty of headroom — one listener per active WS session, plus internal
+// observers (metrics, logs). Default is 10, which would warn on a busy
+// process.
+paymentEvents.setMaxListeners(50);
+
+/** Subscribe to payment events. Returns an unsubscribe fn. */
+export function onPlumberPayment(
+  listener: (ev: PlumberPaymentEvent) => void,
+): () => void {
+  paymentEvents.on('payment', listener);
+  return () => paymentEvents.off('payment', listener);
+}
+
+/** Internal: emit a payment event. */
+function emitPaymentEvent(ev: PlumberPaymentEvent): void {
+  try {
+    paymentEvents.emit('payment', ev);
+  } catch (err) {
+    // A misbehaving subscriber should never break the payment flow.
+    console.warn('[plumber-client] payment-event listener threw', err);
+  }
+}
 
 /**
  * x402 v2 client for the agent-plumber HTTP surface.
@@ -138,13 +204,45 @@ export interface PlumberClientOptions {
 }
 
 /**
- * Thin auth/payment helper. State-free — every call is a stateless retry on
- * 402. No bearer caching, no handshake (plumber's canonical x402 path
- * doesn't authenticate beyond the payment signature).
+ * Auth/payment helper for the plumber HTTP surface.
+ *
+ * Two rails are supported in parallel:
+ *
+ *  1. **Delegate-pay (primary)** — when this template has registered plumber
+ *     as an execution delegate on its agent asset, plumber can settle each
+ *     paid call by Execute-CPI charging the asset's PDA directly. For
+ *     plumber to *know* the call is delegated, we have to prove our
+ *     identity: handshake at /auth/handshake with the agent keypair,
+ *     receive a 15-min bearer, attach `Authorization: Bearer …` on every
+ *     subsequent request.
+ *
+ *  2. **x402 (fallback)** — when no bearer is presented OR the on-chain
+ *     delegation check fails OR the Execute CPI fails (e.g. PDA empty),
+ *     plumber returns HTTP 402 and we partial-sign a payment tx that
+ *     plumber co-signs as feePayer.
+ *
+ * The handshake is best-effort: if it fails (no agent asset configured,
+ * the agent isn't delegated yet, the network is flaky) we just send the
+ * request unauthenticated and let plumber answer with a 402 → the x402
+ * path takes over.
  */
 export class PlumberClient {
   /** web3.js Keypair derived from the Umi keypair, cached. */
   private readonly web3Keypair: Web3Keypair;
+
+  /**
+   * Cached bearer token from /auth/handshake. Refreshed lazily on first
+   * use and whenever the cached entry is within 30s of expiry or a request
+   * comes back 401.
+   */
+  private _bearer: { token: string; expiresAt: number } | null = null;
+
+  /**
+   * In-flight handshake promise, deduplicates concurrent first-call traffic
+   * (two requests racing to `/auth/handshake` would burn a nonce slot for
+   * no reason).
+   */
+  private _handshakeInFlight: Promise<string | null> | null = null;
 
   constructor(private readonly opts: PlumberClientOptions) {
     this.web3Keypair = Web3Keypair.fromSecretKey(opts.agentKeypair.secretKey);
@@ -157,6 +255,107 @@ export class PlumberClient {
   /** Caller's wallet pubkey (base58). The owner of the USDC ATA we pay from. */
   get authorityAddress(): string {
     return this.web3Keypair.publicKey.toBase58();
+  }
+
+  /** Caller's on-chain agent asset address (only set when paymentSource='pda'). */
+  get agentAssetAddress(): string | undefined {
+    return this.opts.agentAssetAddress;
+  }
+
+  /**
+   * Return a valid bearer token, performing the handshake on demand.
+   * Returns `null` when we can't authenticate (no agent asset address,
+   * handshake failed, network issue) — callers should proceed
+   * unauthenticated and let the x402 path handle payment.
+   *
+   * Handshake steps:
+   *   1. GET /auth/challenge → nonce.
+   *   2. Build a canonical AuthHandshake { pubkey, agentAsset, audience,
+   *      nonce, issuedAt, expiresAt }, sign canonical JSON with the
+   *      agent keypair (Ed25519).
+   *   3. POST /auth/handshake { handshake, signature } → bearer token.
+   */
+  async getBearer(): Promise<string | null> {
+    if (!this.opts.agentAssetAddress) return null;
+
+    const now = Date.now();
+    // 30s skew buffer — refresh before the server's own check trips.
+    if (this._bearer && this._bearer.expiresAt - 30_000 > now) {
+      return this._bearer.token;
+    }
+    if (this._handshakeInFlight) return this._handshakeInFlight;
+
+    this._handshakeInFlight = this.doHandshake()
+      .catch((err) => {
+        console.warn(
+          '[plumber-client] handshake failed, falling back to x402:',
+          err instanceof Error ? err.message : err,
+        );
+        return null;
+      })
+      .finally(() => {
+        this._handshakeInFlight = null;
+      });
+
+    return this._handshakeInFlight;
+  }
+
+  /** Force a fresh handshake on the next call (used after a 401). */
+  invalidateBearer(): void {
+    this._bearer = null;
+  }
+
+  private async doHandshake(): Promise<string | null> {
+    const baseFetch = globalThis.fetch.bind(globalThis);
+    const challengeRes = await baseFetch(`${this.baseUrl}/auth/challenge`);
+    if (!challengeRes.ok) {
+      throw new Error(`/auth/challenge HTTP ${challengeRes.status}`);
+    }
+    const { nonce } = (await challengeRes.json()) as { nonce: string };
+    if (!nonce) throw new Error('/auth/challenge missing nonce');
+
+    const issuedAt = new Date().toISOString();
+    // Server enforces ≤ 5 min, we use 5 min minus a small skew to stay safe.
+    const expiresAt = new Date(Date.now() + 4 * 60_000).toISOString();
+    const handshake = {
+      pubkey: this.authorityAddress,
+      agentAsset: this.opts.agentAssetAddress!,
+      audience: this.baseUrl,
+      nonce,
+      issuedAt,
+      expiresAt,
+    };
+    // Canonical JSON: sorted keys, no whitespace — must match plumber's
+    // canonicalizeHandshake() exactly so the signature verifies.
+    const canonical = JSON.stringify(
+      Object.fromEntries(
+        Object.keys(handshake).sort().map((k) => [k, handshake[k as keyof typeof handshake]]),
+      ),
+    );
+    const message = new TextEncoder().encode(canonical);
+    const sigBytes = nacl.sign.detached(message, this.opts.agentKeypair.secretKey);
+    const signature = bs58.encode(sigBytes);
+
+    const handshakeRes = await baseFetch(`${this.baseUrl}/auth/handshake`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ handshake, signature }),
+    });
+    if (!handshakeRes.ok) {
+      let reason = `HTTP ${handshakeRes.status}`;
+      try {
+        const body = (await handshakeRes.json()) as { error?: string };
+        if (body?.error) reason = String(body.error);
+      } catch { /* ignore */ }
+      throw new Error(`/auth/handshake rejected: ${reason}`);
+    }
+    const { token } = (await handshakeRes.json()) as { token: string };
+    if (!token) throw new Error('/auth/handshake missing token');
+
+    // Plumber's bearer TTL is 15 min server-side. Mirror that so we know
+    // when to refresh; we'll re-handshake 30s before the deadline.
+    this._bearer = { token, expiresAt: Date.now() + 15 * 60_000 };
+    return token;
   }
 
   /**
@@ -369,7 +568,25 @@ export function plumberFetch(client: PlumberClient): typeof globalThis.fetch {
       return baseFetch(input, { ...init, headers, body: initialBody });
     };
 
-    let res = await doRequest({});
+    // Best-effort handshake. If it returns null (no asset, not delegated,
+    // network error) we just skip the Authorization header — plumber will
+    // answer with HTTP 402 and the x402 retry below kicks in.
+    const authHeaders: Record<string, string> = {};
+    const bearer = await client.getBearer();
+    if (bearer) authHeaders['Authorization'] = `Bearer ${bearer}`;
+
+    let res = await doRequest(authHeaders);
+
+    // 401 → bearer expired/rejected. Force a fresh handshake and retry
+    // once. We don't loop further — if the second attempt also 401s, the
+    // delegation likely isn't valid; let the response surface to the caller.
+    if (res.status === 401 && bearer) {
+      client.invalidateBearer();
+      const fresh = await client.getBearer();
+      const retryHeaders: Record<string, string> = {};
+      if (fresh) retryHeaders['Authorization'] = `Bearer ${fresh}`;
+      res = await doRequest(retryHeaders);
+    }
 
     if (res.status === 402) {
       const urlForLog =
@@ -412,14 +629,82 @@ export function plumberFetch(client: PlumberClient): typeof globalThis.fetch {
           console.log(
             `[plumber-client] settled: tx=${settle.transaction} payer=${settle.payer}`,
           );
+          emitPaymentEvent({
+            kind: 'x402-paid',
+            label: `x402 ${endpointLabel(urlForLog)}`,
+            from: settle.payer ?? null,
+            to: requirement.payTo,
+            amount: requirement.amount,
+            unit: requirement.asset === NATIVE_SOL_ASSET ? 'lamports' : requirement.asset,
+            signature: settle.transaction,
+            cluster: parseSolanaCluster(settle.network),
+            ts: new Date().toISOString(),
+            detail: {
+              endpoint: urlForLog,
+              memo: (requirement.extra as { memo?: string })?.memo,
+              network: settle.network,
+            },
+          });
         } catch {
           /* ignore */
         }
+      } else if (res.status >= 400) {
+        emitPaymentEvent({
+          kind: 'x402-rejected',
+          label: `x402 retry rejected (HTTP ${res.status})`,
+          to: requirement.payTo,
+          amount: requirement.amount,
+          unit: requirement.asset === NATIVE_SOL_ASSET ? 'lamports' : requirement.asset,
+          ts: new Date().toISOString(),
+          detail: { endpoint: urlForLog, status: res.status },
+        });
+      }
+    } else {
+      // Non-402 success or error. If the server settled via the delegate
+      // rail it'll attach `X-Plumber-Charge-Signature` — surface that as
+      // a delegate-pay ledger event.
+      const chargeSig = res.headers.get('x-plumber-charge-signature');
+      if (chargeSig) {
+        const urlForLog =
+          typeof input === 'string'
+            ? input
+            : input instanceof Request
+              ? input.url
+              : input.toString();
+        emitPaymentEvent({
+          kind: 'delegate-charge',
+          label: `delegate-pay ${endpointLabel(urlForLog)}`,
+          from: client.agentAssetAddress
+            ? `PDA(${client.agentAssetAddress.slice(0, 6)}…)`
+            : null,
+          to: null,
+          signature: chargeSig,
+          ts: new Date().toISOString(),
+          detail: { endpoint: urlForLog, rail: res.headers.get('x-plumber-charge-rail') },
+        });
       }
     }
 
     return res;
   };
+}
+
+/** Strip a plumber URL down to its route label, e.g. `/v1/chat/completions`. */
+function endpointLabel(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
+/** Parse CAIP-2 `solana:<genesis>` into a cluster name plumber's network uses. */
+function parseSolanaCluster(
+  network: string,
+): 'devnet' | 'mainnet-beta' | 'testnet' | null {
+  if (network.includes('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp')) return 'mainnet-beta';
+  if (network.includes('EtWTRABZaYq6iMfeYKouRu166VU2xqa1')) return 'devnet';
+  return null;
 }
 
 // ---------------------------------------------------------------------------

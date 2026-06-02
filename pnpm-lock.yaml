@@ -104,8 +104,8 @@ importers:
         specifier: ^0.10.0
         version: 0.10.0(@metaplex-foundation/umi@1.5.1)
       '@metaplex-foundation/plexchat':
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: file:../../../metaplex-plexchat
+        version: file:../metaplex-plexchat
       '@metaplex-foundation/umi':
         specifier: ^1.1.0
         version: 1.5.1
@@ -429,8 +429,8 @@ packages:
     peerDependencies:
       '@metaplex-foundation/umi': '>= 0.8.2 <= 1'
 
-  '@metaplex-foundation/plexchat@0.1.0':
-    resolution: {integrity: sha512-NbNtZDncrvZVI7wGI+20mgtPvtnqF1iQqtKznQeEZPIHuOJSciBco5epj9oghdGSOfe4RysdfexUU0tm/wXXNQ==}
+  '@metaplex-foundation/plexchat@file:../metaplex-plexchat':
+    resolution: {directory: ../metaplex-plexchat, type: directory}
     engines: {node: '>=20'}
 
   '@metaplex-foundation/umi-bundle-defaults@1.5.1':
@@ -2257,7 +2257,7 @@ snapshots:
     dependencies:
       '@metaplex-foundation/umi': 1.5.1
 
-  '@metaplex-foundation/plexchat@0.1.0':
+  '@metaplex-foundation/plexchat@file:../metaplex-plexchat':
     dependencies:
       bs58: 6.0.0
       tweetnacl: 1.0.3
