@@ -65,6 +65,13 @@ export interface PlumberPaymentEvent {
     | 'x402-rejected'
     | 'delegate-charge'
     | 'delegate-onboard';
+  /**
+   * What the spend was *for*, orthogonal to the payment mechanism in
+   * `kind`. Mirrors plexchat's `DebugLedgerEntry.purpose` canonical set
+   * (`inference`, `rpc`, `tool`, `storage`, `compute`, `onboarding`,
+   * `other`). The chat UI's Ledger tab renders this as a second badge.
+   */
+  purpose?: string | null;
   label: string;
   from?: string | null;
   to?: string | null;
@@ -631,6 +638,7 @@ export function plumberFetch(client: PlumberClient): typeof globalThis.fetch {
           );
           emitPaymentEvent({
             kind: 'x402-paid',
+            purpose: purposeForEndpoint(urlForLog),
             label: `x402 ${endpointLabel(urlForLog)}`,
             from: settle.payer ?? null,
             to: requirement.payTo,
@@ -651,6 +659,7 @@ export function plumberFetch(client: PlumberClient): typeof globalThis.fetch {
       } else if (res.status >= 400) {
         emitPaymentEvent({
           kind: 'x402-rejected',
+          purpose: purposeForEndpoint(urlForLog),
           label: `x402 retry rejected (HTTP ${res.status})`,
           to: requirement.payTo,
           amount: requirement.amount,
@@ -673,6 +682,7 @@ export function plumberFetch(client: PlumberClient): typeof globalThis.fetch {
               : input.toString();
         emitPaymentEvent({
           kind: 'delegate-charge',
+          purpose: purposeForEndpoint(urlForLog),
           label: `delegate-pay ${endpointLabel(urlForLog)}`,
           from: client.agentAssetAddress
             ? `PDA(${client.agentAssetAddress.slice(0, 6)}…)`
@@ -696,6 +706,20 @@ function endpointLabel(url: string): string {
   } catch {
     return url;
   }
+}
+
+/**
+ * Map a plumber endpoint URL to a `purpose` category understood by the
+ * chat UI's Ledger tab. Keeps the mapping in one place so the emit
+ * sites can stay short.
+ */
+function purposeForEndpoint(url: string): string {
+  const path = endpointLabel(url);
+  if (path.includes('/chat/completions') || path.includes('/images/generations')) {
+    return 'inference';
+  }
+  if (path.includes('/solana/rpc')) return 'rpc';
+  return 'other';
 }
 
 /** Parse CAIP-2 `solana:<genesis>` into a cluster name plumber's network uses. */
