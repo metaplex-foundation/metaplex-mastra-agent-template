@@ -24,7 +24,7 @@
     "@solana/web3.js": "^1.98.0",
     "@metaplex-foundation/mpl-core": "^1.9.1",
     "@metaplex-foundation/mpl-toolbox": "^0.10.0",
-    "@metaplex-foundation/plexchat": "file:../../../metaplex-plexchat",
+    "@metaplex-foundation/plexchat": "^0.2.0",
     "@metaplex-foundation/umi": "^1.1.0",
     "@metaplex-foundation/umi-bundle-defaults": "^1.1.0",
     "@noble/hashes": "1.7.1",
