@@ -17,6 +17,7 @@ import {
   AllowlistFile,
   WalletRateLimiter,
   buildToolHostContext,
+  onPlumberPayment,
   type SiwsParams,
   type ServerMessage,
   type TransactionSender,
@@ -241,17 +242,42 @@ export class PlexChatServer {
     }
 
     // --- Preflight: RPC connectivity ---
-    try {
-      const umi = createUmi();
-      await umi.rpc.getSlot();
-    } catch (err) {
-      const message =
-        'Startup preflight failed: could not reach Solana RPC.\n' +
-        '  RPC URL: ' + config.SOLANA_RPC_URL + '\n' +
-        '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
-        '  Hint: check SOLANA_RPC_URL in .env and your network connection.';
-      console.error(message);
-      throw new Error(message);
+    // In plumber mode the RPC layer routes through `${PLUMBER_URL}/v1/solana/rpc`
+    // and EVERY call is paid (x402 or delegation). A real `getSlot()` probe
+    // would burn SOL every boot and would also fail before the agent is
+    // registered (since the handshake checks delegation on-chain). Instead
+    // probe plumber's unauthenticated `/healthz` — cheap, deterministic,
+    // tells us the same thing for the boot-time check.
+    if (config.PLUMBER_URL) {
+      const healthUrl = `${config.PLUMBER_URL.replace(/\/+$/, '')}/healthz`;
+      try {
+        const res = await fetch(healthUrl);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+      } catch (err) {
+        const message =
+          'Startup preflight failed: could not reach plumber.\n' +
+          '  PLUMBER_URL: ' + config.PLUMBER_URL + '\n' +
+          '  Probed: ' + healthUrl + '\n' +
+          '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
+          '  Hint: check PLUMBER_URL in .env and confirm the service is running.';
+        console.error(message);
+        throw new Error(message);
+      }
+    } else {
+      try {
+        const umi = createUmi();
+        await umi.rpc.getSlot();
+      } catch (err) {
+        const message =
+          'Startup preflight failed: could not reach Solana RPC.\n' +
+          '  RPC URL: ' + config.SOLANA_RPC_URL + '\n' +
+          '  Error: ' + (err instanceof Error ? err.message : String(err)) + '\n' +
+          '  Hint: check SOLANA_RPC_URL in .env and your network connection.';
+        console.error(message);
+        throw new Error(message);
+      }
     }
 
     // Pass a request handler to createServer so plain HTTP requests (the
@@ -361,7 +387,11 @@ export class PlexChatServer {
         console.log(`PlexChat WebSocket server running on ws://localhost:${boundPort}`);
         console.log(`Agent mode: ${config.AGENT_MODE}`);
         console.log(`Agent name: ${config.ASSISTANT_NAME}`);
-        console.log(`RPC: ${config.SOLANA_RPC_URL}`);
+        console.log(
+          config.PLUMBER_URL
+            ? `RPC: ${config.PLUMBER_URL}/v1/solana/rpc (via plumber)`
+            : `RPC: ${config.SOLANA_RPC_URL}`,
+        );
         // The chat template's `next dev` hardcodes :3001. If the operator
         // overrides that port locally, this URL won't match — but neither
         // would the previous bare `http://localhost:3001`, so we're not
@@ -467,6 +497,16 @@ export class PlexChatServer {
     // --- Create session ---
     const session = new Session(ws, new RateLimiter(20, 10000));
     this.sessions.set(ws, session);
+
+    // --- Subscribe to plumber payment events ---
+    // The PlumberClient (in shared/) emits payment events on a process-wide
+    // emitter. Forward them to this session as `debug:ledger` so the chat
+    // UI's Ledger tab can render fund flows live. All sessions see all
+    // payment events (the emitter is process-wide), which is acceptable
+    // for a debugging tab.
+    session.unsubscribePaymentEvents = onPlumberPayment((ev) => {
+      session.send({ type: 'debug:ledger', ...ev });
+    });
 
     // H8: both close and error funnel through the same idempotent cleanup.
     // In the error branch we also call terminate() because ws can emit
@@ -841,11 +881,6 @@ export class PlexChatServer {
   private handleTxResult(session: Session, correlationId: string | undefined, signature: string | undefined): void {
     const config = getConfig();
 
-    if (config.AGENT_MODE === 'autonomous') {
-      session.send({ type: 'error', error: 'tx_result is not accepted in autonomous mode', code: 'INVALID_MODE' });
-      return;
-    }
-
     if (typeof correlationId !== 'string' || !correlationId) {
       session.send({ type: 'error', error: 'tx_result.correlationId is required', code: 'MISSING_CORRELATION' });
       return;
@@ -857,6 +892,19 @@ export class PlexChatServer {
     }
 
     const pending = session.pendingTransactions.get(correlationId);
+
+    // In autonomous mode, we don't expect a human signer in the loop —
+    // so reject *unsolicited* tx_results (defense vs. forged messages).
+    // BUT: owner-auth tools like `delegate-to-nori` deliberately route
+    // through `submitWithUserWallet`, which IS expected to round-trip a
+    // user signature. Those create a pending transaction the server
+    // itself tracked, so a matching correlationId means the reply was
+    // solicited and should be accepted regardless of AGENT_MODE.
+    if (config.AGENT_MODE === 'autonomous' && !pending) {
+      session.send({ type: 'error', error: 'tx_result is not accepted in autonomous mode', code: 'INVALID_MODE' });
+      return;
+    }
+
     if (!pending) {
       // M10: Unknown correlationId AND a well-formed base58 signature is the
       // "late-ok" case — the user approved the tx after the pending promise
@@ -887,13 +935,18 @@ export class PlexChatServer {
   private handleTxError(session: Session, correlationId: string | undefined, reason: string | undefined): void {
     const config = getConfig();
 
-    if (config.AGENT_MODE === 'autonomous') {
-      session.send({ type: 'error', error: 'tx_error is not accepted in autonomous mode', code: 'INVALID_MODE' });
+    if (typeof correlationId !== 'string' || !correlationId) {
+      session.send({ type: 'error', error: 'tx_error.correlationId is required', code: 'MISSING_CORRELATION' });
       return;
     }
 
-    if (typeof correlationId !== 'string' || !correlationId) {
-      session.send({ type: 'error', error: 'tx_error.correlationId is required', code: 'MISSING_CORRELATION' });
+    const pending = session.pendingTransactions.get(correlationId);
+
+    // Mirror handleTxResult: reject unsolicited tx_errors in autonomous
+    // mode, but accept replies to a pending tx the server itself opened
+    // (the user-signed path used by owner-auth tools like delegate-to-nori).
+    if (config.AGENT_MODE === 'autonomous' && !pending) {
+      session.send({ type: 'error', error: 'tx_error is not accepted in autonomous mode', code: 'INVALID_MODE' });
       return;
     }
 
@@ -901,7 +954,6 @@ export class PlexChatServer {
       ? reason
       : 'User rejected or wallet error';
 
-    const pending = session.pendingTransactions.get(correlationId);
     if (!pending) {
       session.send({ type: 'error', error: 'Unknown correlationId', code: 'UNKNOWN_CORRELATION' });
       return;

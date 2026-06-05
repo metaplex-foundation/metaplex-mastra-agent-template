@@ -219,6 +219,28 @@ const wsAllowedOriginsSchema = z
 const envSchema = z.object({
   AGENT_MODE: z.enum(['public', 'autonomous']).default('public'),
   LLM_MODEL: z.string().default('anthropic/claude-sonnet-4-5-20250929'),
+  /**
+   * Optional URL of a remote agent-plumber service that backs LLM inference,
+   * Solana RPC, and DAS calls. When set, the agent no longer requires
+   * provider API keys (ANTHROPIC_API_KEY, etc.) or a paid SOLANA_RPC_URL —
+   * plumber sells those wholesale and we pay per-call in SOL.
+   *
+   * Prereqs (so the SIWS-style handshake with plumber succeeds):
+   *   - The agent has been registered on-chain (AGENT_ASSET_ADDRESS set).
+   *   - The agent's keypair is a registered execution delegate on that asset.
+   *   - The agent's keypair has SOL to satisfy x402 payment txs.
+   *
+   * Trailing slashes are tolerated and stripped at use-site.
+   */
+  PLUMBER_URL: optional(z.string().url('PLUMBER_URL must be a valid URL')),
+  /**
+   * Where x402 payments to plumber draw funds from:
+   *   - `keypair` (default): the agent's `AGENT_KEYPAIR` wallet pays directly.
+   *   - `pda`: the agent's mpl-core asset signer PDA pays via Execute CPI.
+   *     Useful when SOL has accumulated at the PDA from other operations.
+   *     Requires `AGENT_ASSET_ADDRESS` to be set.
+   */
+  PLUMBER_PAYMENT_SOURCE: z.enum(['keypair', 'pda']).default('keypair'),
   SOLANA_RPC_URL: z.string().default('https://api.devnet.solana.com'),
   /**
    * Explicit network identifier for the SIWS auth_challenge. Optional —
@@ -346,6 +368,11 @@ const LLM_PROVIDER_ENV_KEYS: Record<string, string> = {
 };
 
 function validateLlmApiKey(cfg: EnvConfig): void {
+  // PLUMBER_URL routes inference through a remote service that holds its own
+  // provider keys — the local agent doesn't need any. Skip the local-key
+  // presence check in that mode.
+  if (cfg.PLUMBER_URL) return;
+
   const [provider] = cfg.LLM_MODEL.split('/');
   if (!provider) return; // no provider prefix — let Mastra decide
   const expected = LLM_PROVIDER_ENV_KEYS[provider.toLowerCase()];
@@ -354,7 +381,8 @@ function validateLlmApiKey(cfg: EnvConfig): void {
   if (!value || value.length === 0) {
     throw new Error(
       `Missing LLM API key: LLM_MODEL="${cfg.LLM_MODEL}" requires ${expected} ` +
-      'to be set in the environment. See .env.example.'
+      'to be set in the environment. See .env.example. ' +
+      '(Or set PLUMBER_URL to route inference through a remote service.)'
     );
   }
 }
