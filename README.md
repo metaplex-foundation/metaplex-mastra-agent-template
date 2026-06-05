@@ -1,5 +1,22 @@
 # Metaplex Agent Template
 
+> **DEPRECATED — 2026-06-05**
+>
+> This template has been superseded by the Cloudflare-native template at
+> [metaplex-global/cloudflare-agents](https://github.com/metaplex-global/cloudflare-agents).
+>
+> The new template:
+> - Runs on Cloudflare Workers + Durable Objects (no Node host to operate)
+> - Same Solana toolkit (`@metaplex-foundation/agent-tools`), same SIWS auth, same on-chain identity
+> - Native multi-tenancy via Durable Objects
+> - Same x402 v2 / plumber payment rail
+>
+> Existing deployments keep working — there is no forced migration. New projects should
+> use `npx create-metaplex-agent my-agent` which now scaffolds the CF template.
+>
+> The snapshot at the commit tagged `pre-cf-migration-2026-06-05` is the last point
+> at which this template was the canonical recommendation.
+
 > Build and launch a Solana AI agent in five minutes. SIWS wallet auth, on-chain identity via the [Metaplex Agent Registry](https://metaplex.com/agents), Mastra + Umi inside, no shared secrets to manage.
 >
 > **BYOK-free mode:** point `PLUMBER_URL` at a running [agent-plumber](../agent-plumber) and the template runs without provider API keys or a paid Solana RPC. Plumber handles LLM inference, image generation, Solana RPC, and DAS; the agent pays per-call in SOL via x402. See [Plumber-backed mode](#plumber-backed-mode) below.
