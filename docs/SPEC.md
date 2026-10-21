@@ -945,7 +945,7 @@ What remains out of scope for the template: cross-connection identity (a single 
 
 | Layer | Technology | Version |
 |---|---|---|
-| Runtime | Node.js | >= 20 |
+| Runtime | Node.js | >= 22 |
 | Package Manager | pnpm | >= 9 |
 | Language | TypeScript | 5.8+ in packages, 6.x root devDep (ES2022 target, strict mode, `module: ESNext`, `moduleResolution: bundler`) |
 | AI Framework | Mastra (`@mastra/core`) | 1.24+ |
