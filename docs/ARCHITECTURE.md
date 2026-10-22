@@ -208,7 +208,7 @@ metaplex-agent-template/
   .dockerignore                 # Docker build-context exclusions
   .npmrc                        # shamefully-hoist=true (Umi compatibility)
   agent-state.json              # Auto-generated agent identity (0600, gitignored)
-  Dockerfile                    # Multi-stage server image (Node 20 slim, non-root)
+  Dockerfile                    # Multi-stage server image (Node 24 slim, non-root)
   package.json                  # Root workspace scripts (dev, build, typecheck, bootstrap)
   pnpm-workspace.yaml           # pnpm workspace definition (packages/*)
   railway.json                  # Railway deploy manifest (Dockerfile builder)
@@ -544,7 +544,7 @@ This compiles TypeScript to JavaScript in each package's `dist/` folder, then st
 
 The repo ships three deploy artifacts out of the box:
 
-- **`Dockerfile`** — multi-stage Node 20 slim image. Installs with pnpm, builds `shared → core → server`, and runs as non-root user `agent` on port 3002. UI is excluded from the server image via `.dockerignore` (the UI is designed to deploy separately, e.g. on Vercel).
+- **`Dockerfile`** — multi-stage Node 24 slim image. Installs with pnpm, builds `shared → core → server`, and runs as non-root user `agent` on port 3002. UI is excluded from the server image via `.dockerignore` (the UI is designed to deploy separately, e.g. on Vercel).
 - **`railway.json`** — Railway config pointing at the Dockerfile. Railway injects `PORT`; `config.ts` falls back to it when `WEB_CHANNEL_PORT` is not set, so no extra wiring is needed.
 - **`.dockerignore`** — keeps `.env`, `agent-state.json`, `node_modules`, local builds, docs, and the UI source out of the build context.
 

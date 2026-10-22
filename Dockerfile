@@ -15,10 +15,10 @@
 # Dockerfiles (Fly, Render, Koyeb, Kubernetes, plain `docker run`, etc.).
 # -----------------------------------------------------------------------------
 
-FROM node:20-slim AS builder
+FROM node:24.22.1-slim AS builder
 WORKDIR /app
 
-# Enable pnpm via corepack (shipped with Node 20).
+# Enable pnpm via corepack (shipped with Node 24).
 RUN corepack enable
 
 # Copy workspace manifests first so `pnpm install` is cacheable independently
@@ -45,7 +45,7 @@ RUN pnpm --filter @metaplex-foundation/shared \
 # -----------------------------------------------------------------------------
 # Runtime stage
 # -----------------------------------------------------------------------------
-FROM node:20-slim AS runtime
+FROM node:24.22.1-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production

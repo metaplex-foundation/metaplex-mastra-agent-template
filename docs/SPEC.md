@@ -945,7 +945,7 @@ What remains out of scope for the template: cross-connection identity (a single 
 
 | Layer | Technology | Version |
 |---|---|---|
-| Runtime | Node.js | >= 20 |
+| Runtime | Node.js | >= 22 |
 | Package Manager | pnpm | >= 9 |
 | Language | TypeScript | 5.8+ in packages, 6.x root devDep (ES2022 target, strict mode, `module: ESNext`, `moduleResolution: bundler`) |
 | AI Framework | Mastra (`@mastra/core`) | 1.24+ |
@@ -963,7 +963,7 @@ What remains out of scope for the template: cross-connection identity (a single 
 | Validation | Zod | 3.23+ |
 | Secret-key decoding | `bs58` | 6+ |
 | Env loading | `dotenv` | 16+ |
-| Containers | Node 20 slim Dockerfile (multi-stage) | — |
+| Containers | Node 24 slim Dockerfile (multi-stage) | — |
 | PaaS config | `railway.json` (Dockerfile builder) | — |
 
 ---
@@ -1085,7 +1085,7 @@ metaplex-agent-template/
   agent-state.json                Auto-generated agent identity (0600, gitignored)
   wallets.allowlist.example.json  Template for the SIWS wallet allowlist file (§5.1)
   wallets.allowlist.json          Operator-local allowlist (gitignored, hot-reloaded)
-  Dockerfile                      Multi-stage server image (Node 20 slim, non-root)
+  Dockerfile                      Multi-stage server image (Node 24 slim, non-root)
   package.json                    Root workspace scripts (dev, build, clean, typecheck, bootstrap)
   pnpm-workspace.yaml             `packages/*`
   railway.json                    Railway deploy manifest (Dockerfile builder)

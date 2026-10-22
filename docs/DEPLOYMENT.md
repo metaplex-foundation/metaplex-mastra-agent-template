@@ -136,7 +136,7 @@ MAX_MESSAGE_CONTENT=4000
 ### Example Dockerfile (public mode)
 
 ```dockerfile
-FROM node:20-slim AS builder
+FROM node:24.22.1-slim AS builder
 WORKDIR /app
 RUN corepack enable
 COPY pnpm-*.yaml package.json ./
@@ -144,7 +144,7 @@ COPY packages ./packages
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
-FROM node:20-slim
+FROM node:24.22.1-slim
 WORKDIR /app
 COPY --from=builder /app ./
 ENV NODE_ENV=production
@@ -299,7 +299,7 @@ spec:
 ### Example Dockerfile (autonomous mode)
 
 ```dockerfile
-FROM node:20-slim AS builder
+FROM node:24.22.1-slim AS builder
 WORKDIR /app
 RUN corepack enable
 COPY pnpm-*.yaml package.json ./
@@ -309,7 +309,7 @@ COPY packages/server ./packages/server
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @metaplex-foundation/shared --filter @metaplex-foundation/core --filter @metaplex-foundation/server build
 
-FROM node:20-slim
+FROM node:24.22.1-slim
 WORKDIR /app
 COPY --from=builder /app ./
 ENV NODE_ENV=production
