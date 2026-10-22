@@ -51,6 +51,14 @@ async function listToolNames(agent: { listTools: (...args: any[]) => any }): Pro
   return Object.keys(tools).sort();
 }
 
+// Both agents add the Nori delegation tools on top of their toolset,
+// whatever the mode default or the `tools:` selection.
+const NORI_DELEGATION_TOOLS = ['delegate-to-nori', 'list-delegates', 'revoke-delegate'];
+
+function withDelegationTools(names: string[]): string[] {
+  return [...names, ...NORI_DELEGATION_TOOLS].sort();
+}
+
 // --- Public mode ------------------------------------------------------
 
 test('createAgent (AGENT_MODE=public) returns an agent with the public toolset', async () => {
@@ -58,7 +66,7 @@ test('createAgent (AGENT_MODE=public) returns an agent with the public toolset',
   const agent = createAgent();
   const names = await listToolNames(agent);
   // Public toolset = sharedTools + publicTools.
-  assert.deepEqual(names, Object.keys(publicAgentTools).sort());
+  assert.deepEqual(names, withDelegationTools(Object.keys(publicAgentTools)));
 });
 
 test('public-mode agent includes transfer-sol and transfer-token', async () => {
@@ -113,7 +121,7 @@ test('createAgent (AGENT_MODE=autonomous) returns an agent with the autonomous t
   );
   const agent = createAgent();
   const names = await listToolNames(agent);
-  assert.deepEqual(names, Object.keys(autonomousAgentTools).sort());
+  assert.deepEqual(names, withDelegationTools(Object.keys(autonomousAgentTools)));
 });
 
 test('autonomous-mode agent includes setGoal, addTask, withdrawSol, setPaused', async () => {
@@ -196,7 +204,7 @@ test('public-mode agent honors tools.include from agent.config.yaml', async () =
   });
   const agent = createAgent();
   const names = await listToolNames(agent);
-  assert.deepEqual(names, ['getBalance', 'getTokenPrice']);
+  assert.deepEqual(names, withDelegationTools(['getBalance', 'getTokenPrice']));
 });
 
 test('public-mode agent honors tools.exclude on top of include', async () => {
@@ -237,7 +245,7 @@ test('autonomous-mode agent honors tools.include from agent.config.yaml', async 
   });
   const agent = createAgent();
   const names = await listToolNames(agent);
-  assert.deepEqual(names, ['getBalance', 'setGoal']);
+  assert.deepEqual(names, withDelegationTools(['getBalance', 'setGoal']));
 });
 
 test('missing tools section preserves the mode default (public)', async () => {
@@ -248,7 +256,7 @@ test('missing tools section preserves the mode default (public)', async () => {
   _setAgentConfigFileForTests(null);
   const agent = createAgent();
   const names = await listToolNames(agent);
-  assert.deepEqual(names, Object.keys(publicAgentTools).sort());
+  assert.deepEqual(names, withDelegationTools(Object.keys(publicAgentTools)));
 });
 
 test('unknown tool id in include throws a helpful error', () => {
