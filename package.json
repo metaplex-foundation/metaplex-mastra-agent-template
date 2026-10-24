@@ -28,5 +28,10 @@
     "concurrently": "^9.2.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "body-parser@<2.4.0": "^2.4.0"
+    }
   }
 }
